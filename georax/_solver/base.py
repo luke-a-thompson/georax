@@ -7,15 +7,13 @@ from typing import ClassVar, override
 
 import jax.numpy as jnp
 import numpy as np
+from diffrax import RESULTS, AbstractSolver, AbstractTerm, LocalLinearInterpolation
+from diffrax._custom_types import VF, Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
+from diffrax._term import WrapTerm
+from diffrax_lowstorage import LowStorageRecurrence
 from jaxtyping import Array
 
-from diffrax._custom_types import Args, BoolScalarLike, DenseInfo, RealScalarLike, VF, Y
-from diffrax._local_interpolation import LocalLinearInterpolation
-from diffrax._solution import RESULTS
-from diffrax._solver.base import AbstractSolver
-from diffrax._term import AbstractTerm, WrapTerm
-
-from ._term import GeometricTerm
+from georax._term import GeometricTerm
 
 
 @dataclass(frozen=True)
@@ -62,7 +60,7 @@ class CommutatorFreeTableau:
                     )
 
 
-class AbstractCommutatorFreeSolver(AbstractSolver[None]):
+class AbstractCommutatorFreeSolver(AbstractSolver):
     term_structure: ClassVar[type[GeometricTerm]] = GeometricTerm
     interpolation_cls: ClassVar[Callable[..., LocalLinearInterpolation]] = (
         LocalLinearInterpolation
@@ -172,3 +170,67 @@ class AbstractCommutatorFreeSolver(AbstractSolver[None]):
     def order(self, terms: GeometricTerm) -> int | None:
         del terms
         """Order of convergence for ODEs."""
+
+
+class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
+    recurrence: ClassVar[LowStorageRecurrence]
+
+    def error_order(self, terms: GeometricTerm) -> int | None:
+        if not self.recurrence.penultimate_stage_error:
+            return None
+        return self.order(terms)
+
+    @override
+    def step(
+        self,
+        terms: GeometricTerm,
+        t0: RealScalarLike,
+        t1: RealScalarLike,
+        y0: Y,
+        args: Args,
+        solver_state: None,
+        made_jump: BoolScalarLike,
+    ) -> tuple[Y, Y | None, DenseInfo, None, RESULTS]:
+        del solver_state, made_jump
+
+        a = jnp.asarray(self.recurrence.A)
+        b = jnp.asarray(self.recurrence.B)
+        c = jnp.asarray(self.recurrence.C)
+
+        dt = t1 - t0
+        control = jnp.asarray(terms.contr(t0, t1))
+        geometric_term = self._unwrap_geometric_term(terms)
+        y0_array = y0
+
+        t_stage0 = t1 if self.recurrence.C[0] == 1.0 else t0 + c[0] * dt
+        tmp = control * geometric_term.coeffs(t_stage0, y0_array, args)
+        y1 = geometric_term.frozen_flow(
+            y0_array, jnp.asarray(b[0], dtype=tmp.dtype) * tmp
+        )
+
+        y_penultimate = None
+        for stage_index in range(1, self.recurrence.num_stages):
+            t_stage = (
+                t1
+                if self.recurrence.C[stage_index] == 1.0
+                else t0 + c[stage_index] * dt
+            )
+            coeffs = control * geometric_term.coeffs(t_stage, y1, args)
+            tmp = jnp.asarray(a[stage_index - 1], dtype=tmp.dtype) * tmp + coeffs
+            if (
+                self.recurrence.penultimate_stage_error
+                and stage_index == self.recurrence.num_stages - 1
+            ):
+                y_penultimate = y1
+            y1 = geometric_term.frozen_flow(
+                y1, jnp.asarray(b[stage_index], dtype=tmp.dtype) * tmp
+            )
+
+        y_error = None
+        if y_penultimate is not None:
+            # This ambient subtraction is acceptable for now; a geometry-aware
+            # difference may be preferable for manifold error control later.
+            y_error = y1 - y_penultimate
+
+        dense_info = dict(y0=y0, y1=y1)
+        return y1, y_error, dense_info, None, RESULTS.successful

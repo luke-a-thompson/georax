@@ -7,12 +7,18 @@ import numpy as np
 import pytest
 from diffrax import ODETerm
 from diffrax._term import WrapTerm
+from diffrax_lowstorage import LowStorageRecurrence
 from jaxtyping import Array
 
+from georax import (
+    CFEES25,
+    CG2,
+    AbstractCommutatorFreeSolver,
+    AbstractLowStorageCommutatorFreeSolver,
+)
 from georax._geometry import GeometricOps
+from georax._solver.base import CommutatorFreeTableau
 from georax._term import GeometricTerm
-from georax.base import AbstractCommutatorFreeSolver, CommutatorFreeTableau
-from georax.cg2 import CG2
 
 
 class EuclideanOps(GeometricOps):
@@ -58,8 +64,21 @@ class TableauSolver(AbstractCommutatorFreeSolver):
         return self._order
 
 
+class LowStorageSolver(AbstractLowStorageCommutatorFreeSolver):
+    recurrence: ClassVar[LowStorageRecurrence]
+    _order: ClassVar[int]
+
+    def order(self, terms: GeometricTerm) -> int | None:
+        del terms
+        return self._order
+
+
 def _solver_type(name: str, tableau: CommutatorFreeTableau, order: int):
     return type(name, (TableauSolver,), {"tableau": tableau, "_order": order})
+
+
+def _low_storage_solver_type(name: str, recurrence: LowStorageRecurrence, order: int):
+    return type(name, (LowStorageSolver,), {"recurrence": recurrence, "_order": order})
 
 
 def _make_term(vf, geometry: GeometricOps) -> GeometricTerm:
@@ -113,6 +132,21 @@ def _old_single_exp_step(
     for weight, stage in zip(b, stages, strict=True):
         output_coeffs = output_coeffs + weight * stage
     return y0 + output_coeffs
+
+
+def _old_cf_ees25_step(vf, y0: Array, t0: float, t1: float) -> Array:
+    dt = t1 - t0
+
+    k1 = dt * vf(t0, y0, None)
+    y1 = y0 + 0.5 * k1
+
+    k2 = vf(t0 + 0.5 * dt, y1, None)
+    delta_y2 = -0.5 * k1 + dt * k2
+    y2 = y1 + delta_y2
+
+    k3 = vf(t1, y2, None)
+    delta_y3 = -2.0 * delta_y2 + dt * k3
+    return y2 + 0.25 * delta_y3
 
 
 def test_tableau_shape_validation() -> None:
@@ -244,6 +278,42 @@ def test_embedded_pair_returns_error_estimate() -> None:
     assert bool(jnp.allclose(y_error, jnp.array([3.0])))
     assert bool(jnp.allclose(dense_info["y0"], jnp.array([1.0])))
     assert bool(jnp.allclose(dense_info["y1"], y1))
+
+
+def test_low_storage_recurrence_applies_chained_flows() -> None:
+    recurrence = LowStorageRecurrence(
+        A=np.array([0.5]),
+        B=np.array([0.5, 1.0]),
+        C=np.array([0.0, 1.0]),
+    )
+    TwoStageLowStorageSolver = _low_storage_solver_type(
+        "TwoStageLowStorageSolver", recurrence, 2
+    )
+
+    def vf(t, y, args):
+        del t, args
+        return y
+
+    y1, y_error, _, _, _ = _run_step(
+        TwoStageLowStorageSolver(),
+        _make_term(vf, EuclideanOps()),
+    )
+
+    assert y_error is None
+    assert bool(jnp.allclose(y1, jnp.array([3.5])))
+
+
+def test_cfees25_matches_previous_handwritten_step() -> None:
+    def vf(t, y, args):
+        del args
+        return jnp.array([2.0 * t + y[0]])
+
+    y0 = jnp.array([1.0])
+    expected = _old_cf_ees25_step(vf, y0=y0, t0=0.0, t1=1.0)
+    y1, y_error, _, _, _ = _run_step(CFEES25(), _make_term(vf, EuclideanOps()), y0=y0)
+
+    assert y_error is None
+    assert bool(jnp.allclose(y1, expected))
 
 
 def test_wrapped_geometric_term_is_accepted() -> None:

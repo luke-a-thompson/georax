@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import override
 
-from jaxtyping import Array
-
+from diffrax import AbstractTerm
 from diffrax._custom_types import Args, RealScalarLike, Y
-from diffrax._term import AbstractTerm, _Control, _VF
+from diffrax._term import _VF, _Control
+from jaxtyping import Array
 
 from ._geometry import GeometricOps
 

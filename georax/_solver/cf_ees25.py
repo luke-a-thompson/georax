@@ -1,82 +1,40 @@
 from __future__ import annotations
 
-from typing import Any
-from typing import cast, override
+from typing import Any, ClassVar, cast, override
 
 import jax
 import jax.numpy as jnp
 import numpy as np
+from diffrax import ODETerm, SaveAt, diffeqsolve
+from diffrax._custom_types import Args, RealScalarLike
+from diffrax_lowstorage import LowStorageRecurrence
 from jaxtyping import Array
 
-from diffrax import ODETerm, SaveAt, diffeqsolve
-from diffrax._custom_types import Args, BoolScalarLike, DenseInfo, RealScalarLike, VF, Y
-from diffrax._solution import RESULTS
+from georax._solver.base import AbstractLowStorageCommutatorFreeSolver
+from georax._term import GeometricTerm
 
-from ._geometry import SO3Ops
-from ._term import GeometricTerm
-from .base import AbstractCommutatorFreeSolver
+_cf_ees25_recurrence = LowStorageRecurrence(
+    A=np.array([-0.5, -2.0]),
+    B=np.array([0.5, 1.0, 0.25]),
+    C=np.array([0.0, 0.5, 1.0]),
+)
 
 
-class CFEES25(AbstractCommutatorFreeSolver):
+class CFEES25(AbstractLowStorageCommutatorFreeSolver):
     """Commutator-free EES(2,5;1/4) solver with chained exponentials."""
 
-    @override
-    def step(
-        self,
-        terms: GeometricTerm,
-        t0: RealScalarLike,
-        t1: RealScalarLike,
-        y0: Y,
-        args: Args,
-        solver_state: None,
-        made_jump: BoolScalarLike,
-    ) -> tuple[Y, None, DenseInfo, None, RESULTS]:
-        del solver_state, made_jump
-
-        dt = t1 - t0
-        geometric_term = self._unwrap_geometric_term(terms)
-        y0_array = cast(Array, y0)
-        control = terms.contr(t0, t1)
-
-        # Use midpoint/end-point evaluations for the nonautonomous extension.
-        k1 = geometric_term.coeffs(t0, y0_array, args)
-        delta_y1 = jnp.asarray(control, dtype=k1.dtype) * k1
-        y1 = geometric_term.frozen_flow(y0_array, cast(Array, 0.5 * delta_y1))
-
-        t_mid = t0 + 0.5 * dt
-        k2 = geometric_term.coeffs(t_mid, y1, args)
-        delta_y2 = cast(
-            Array, -0.5 * delta_y1 + jnp.asarray(control, dtype=k2.dtype) * k2
-        )
-        y2 = geometric_term.frozen_flow(y1, delta_y2)
-
-        k3 = geometric_term.coeffs(t1, y2, args)
-        delta_y3 = cast(
-            Array, -2.0 * delta_y2 + jnp.asarray(control, dtype=k3.dtype) * k3
-        )
-        y3 = geometric_term.frozen_flow(y2, cast(Array, 0.25 * delta_y3))
-
-        dense_info = dict(y0=y0, y1=y3)
-        return y3, None, dense_info, None, RESULTS.successful
+    recurrence: ClassVar[LowStorageRecurrence] = _cf_ees25_recurrence
 
     @override
     def order(self, terms: GeometricTerm) -> int | None:
         del terms
         return 2
 
-    @override
-    def func(
-        self,
-        terms: GeometricTerm,
-        t0: RealScalarLike,
-        y0: Y,
-        args: Args,
-    ) -> VF:
-        return terms.vf(t0, y0, args)
-
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
+
+    from georax import SO
 
     def omega_body(t: RealScalarLike) -> Array:
         t_array = jnp.asarray(t)
@@ -100,7 +58,7 @@ if __name__ == "__main__":
         )
         return R @ skew
 
-    geo = SO3Ops()
+    geo = SO(3)
     inner = ODETerm(vf)
     term = GeometricTerm(inner=inner, geometry=geo)
     solver = CFEES25()
