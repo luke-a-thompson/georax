@@ -16,25 +16,10 @@ from georax import (
     AbstractCommutatorFreeSolver,
     AbstractLowStorageCommutatorFreeSolver,
 )
+from conftest import EuclideanOps
 from georax._geometry import GeometricOps
 from georax._solver.base import CommutatorFreeTableau
 from georax._term import GeometricTerm
-
-
-class EuclideanOps(GeometricOps):
-    def frame(self, x: Array) -> Array:
-        return jnp.eye(x.shape[0], dtype=x.dtype)
-
-    def to_frame(self, x: Array, v: Array) -> Array:
-        del x
-        return v
-
-    def from_frame(self, x: Array, a: Array) -> Array:
-        del x
-        return a
-
-    def retraction(self, x: Array, v: Array) -> Array:
-        return x + v
 
 
 class AffineRetractionOps(GeometricOps):
