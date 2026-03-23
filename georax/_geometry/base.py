@@ -6,11 +6,12 @@ import equinox as eqx
 from jaxtyping import Array
 
 
-class GeometricOps(eqx.Module):
-    """Minimal geometry backend for manifold Crouch--Grossman with retractions.
+class Manifold(eqx.Module):
+    """Minimal manifold geometry backend for retraction-based integrators.
 
-    This class contains only geometric primitives.
-    It does not contain solver logic.
+    This class contains only geometric primitives and does not contain solver
+    logic. It is sufficient for retraction-based manifold Runge--Kutta schemes
+    such as the current commutator-free solvers.
     """
 
     @abstractmethod
@@ -36,4 +37,18 @@ class GeometricOps(eqx.Module):
     @abstractmethod
     def retraction(self, x: Array, v: Array) -> Array:
         """Map a tangent vector v in T_xM back to M."""
+        ...
+
+
+class LieGroup(Manifold):
+    """Lie-group geometry with a chosen chart for Lie-algebra integrators.
+
+    The chart is understood as a local map tau from Lie-algebra coordinates to
+    the group near the identity. For RKMK-style methods one needs the inverse
+    of the left-trivialized chart differential at a.
+    """
+
+    @abstractmethod
+    def chart_differential_inv(self, a: Array, b: Array) -> Array:
+        """Apply the inverse left-trivialized chart differential at a to b."""
         ...

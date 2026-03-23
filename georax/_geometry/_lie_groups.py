@@ -7,10 +7,10 @@ import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array
 
-from .base import GeometricOps
+from .base import LieGroup
 
 
-class SO(GeometricOps):
+class SO(LieGroup):
     """SO(n) with a left-invariant frame and Cayley retraction."""
 
     n: int = eqx.field(static=True)
@@ -63,6 +63,20 @@ class SO(GeometricOps):
         ident = jnp.eye(self.n, dtype=x.dtype)
         q = jnp.linalg.solve(ident - 0.5 * omega, ident + 0.5 * omega)
         return x @ q
+
+    @override
+    def chart_differential_inv(self, a: Array, b: Array) -> Array:
+        omega = jnp.zeros((self.n, self.n), dtype=jnp.asarray(a).dtype)
+        omega = omega.at[self._upper_i, self._upper_j].set(a)
+        omega = omega.at[self._upper_j, self._upper_i].set(-a)
+
+        eta = jnp.zeros((self.n, self.n), dtype=jnp.asarray(b).dtype)
+        eta = eta.at[self._upper_i, self._upper_j].set(b)
+        eta = eta.at[self._upper_j, self._upper_i].set(-b)
+
+        ident = jnp.eye(self.n, dtype=eta.dtype)
+        corrected = (ident - 0.5 * omega) @ eta @ (ident + 0.5 * omega)
+        return corrected[self._upper_i, self._upper_j]
 
 
 SO3 = SO(3)

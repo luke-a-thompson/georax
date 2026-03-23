@@ -17,12 +17,12 @@ from georax import (
     AbstractLowStorageCommutatorFreeSolver,
 )
 from conftest import EuclideanOps
-from georax._geometry import GeometricOps
+from georax._geometry import Manifold
 from georax._solver.base import CommutatorFreeTableau
 from georax._term import GeometricTerm
 
 
-class AffineRetractionOps(GeometricOps):
+class AffineRetractionOps(Manifold):
     scale: float
 
     def frame(self, x: Array) -> Array:
@@ -66,7 +66,7 @@ def _low_storage_solver_type(name: str, recurrence: LowStorageRecurrence, order:
     return type(name, (LowStorageSolver,), {"recurrence": recurrence, "_order": order})
 
 
-def _make_term(vf, geometry: GeometricOps) -> GeometricTerm:
+def _make_term(vf, geometry: Manifold) -> GeometricTerm:
     return GeometricTerm(inner=ODETerm(vf), geometry=geometry)
 
 

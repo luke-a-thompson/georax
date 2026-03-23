@@ -3,7 +3,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 from jaxtyping import Array
 
-from georax import CFEES25, CG2, GeometricOps
+from georax import CFEES25, CG2, Manifold
 
 SOLVERS = [
     ("cg2", CG2),
@@ -13,7 +13,7 @@ SOLVERS = [
 BENCH_SOLVERS = SOLVERS
 
 
-class EuclideanOps(GeometricOps):
+class EuclideanOps(Manifold):
     def frame(self, x: Array) -> Array:
         return jnp.eye(x.shape[0], dtype=x.dtype)
 

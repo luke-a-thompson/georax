@@ -21,6 +21,6 @@ class CFEES25(AbstractLowStorageCommutatorFreeSolver):
     recurrence: ClassVar[LowStorageRecurrence] = _cf_ees25_recurrence
 
     @override
-    def order(self, terms: GeometricTerm) -> int | None:
+    def order(self, terms: GeometricTerm) -> int:
         del terms
         return 2

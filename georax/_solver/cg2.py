@@ -24,6 +24,6 @@ class CG2(AbstractCommutatorFreeSolver):
     tableau: ClassVar[CommutatorFreeTableau] = _cg2_tableau
 
     @override
-    def order(self, terms: GeometricTerm) -> int | None:
+    def order(self, terms: GeometricTerm) -> int:
         del terms
         return 2

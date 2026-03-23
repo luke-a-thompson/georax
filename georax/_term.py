@@ -7,7 +7,7 @@ from diffrax._custom_types import Args, RealScalarLike, Y
 from diffrax._term import _VF, _Control
 from jaxtyping import Array
 
-from ._geometry import GeometricOps
+from ._geometry import Manifold, LieGroup
 
 
 class GeometricTerm(AbstractTerm[_VF, _Control]):
@@ -18,7 +18,7 @@ class GeometricTerm(AbstractTerm[_VF, _Control]):
     """
 
     inner: AbstractTerm[_VF, _Control]
-    geometry: GeometricOps
+    geometry: Manifold
 
     @override
     def vf(self, t: RealScalarLike, y: Y, args: Args) -> _VF:
@@ -59,3 +59,12 @@ class GeometricTerm(AbstractTerm[_VF, _Control]):
         """
         v = self.geometry.from_frame(x, a)
         return self.geometry.retraction(x, v)
+
+    def chart_differential_inv(self, a: Array, b: Array) -> Array:
+        """Apply the inverse left-trivialized chart differential for Lie groups."""
+        if not isinstance(self.geometry, LieGroup):
+            raise TypeError(
+                "Chart differential inversion in algebra coordinates requires "
+                "LieGroupOps."
+            )
+        return self.geometry.chart_differential_inv(a, b)

@@ -1,7 +1,8 @@
 from ._lie_groups import SO
-from .base import GeometricOps
+from .base import Manifold, LieGroup
 
 __all__ = [
-    "GeometricOps",
+    "Manifold",
+    "LieGroup",
     "SO",
 ]

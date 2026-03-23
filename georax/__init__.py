@@ -1,6 +1,3 @@
-from ._geometry import SO, GeometricOps
-from ._term import GeometricTerm
-
 from georax._solver import (
     CFEES25,
     CG2,
@@ -8,12 +5,16 @@ from georax._solver import (
     AbstractLowStorageCommutatorFreeSolver,
 )
 
+from ._geometry import SO, Manifold, LieGroup
+from ._term import GeometricTerm
+
 __all__ = [
     "AbstractCommutatorFreeSolver",
     "AbstractLowStorageCommutatorFreeSolver",
     "CG2",
     "CFEES25",
-    "GeometricOps",
+    "Manifold",
+    "LieGroup",
     "SO",
     "GeometricTerm",
 ]
