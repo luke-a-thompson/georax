@@ -1,3 +1,7 @@
+[build-system]
+requires = ["uv_build>=0.10.9,<0.11.0"]
+build-backend = "uv_build"
+
 [project]
 name = "georax"
 version = "0.1.0"
@@ -5,22 +9,23 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "diffrax>=0.7.2",
+    "jax>=0.9.1",
+    "diffrax>=0.7.1",
     "diffrax-lowstorage>=0.1.0",
-    "jax[cuda]>=0.9.1",
-    "matplotlib>=3.10.8",
 ]
 
 [tool.uv.sources]
+diffrax = { git = "https://github.com/sammccallum/diffrax", rev = "aeb1335b5a6278e85a270231e0f97b8db4453ae6" }
 diffrax-lowstorage = {git = "https://github.com/luke-a-thompson/diffrax-lowstorage.git"}
 
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "matplotlib>=3.10.8",
 ]
 
-[tool.setuptools]
-packages = ["georax"]
+[tool.uv.build-backend]
+module-root = ""
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
