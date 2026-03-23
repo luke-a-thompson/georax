@@ -31,7 +31,7 @@ class RKMK(AbstractWrappedSolver):
     has_error_estimate: bool = eqx.field(static=True)
 
     def __init__(self, solver: AbstractSolver):
-        if not isinstance(solver, AbstractERK) or solver.tableau.implicit:
+        if not isinstance(solver, AbstractERK):
             raise TypeError("RKMK requires a base explicit Runge-Kutta solver.")
         object.__setattr__(self, "solver", solver)
         object.__setattr__(self, "tableau", solver.tableau)
@@ -56,12 +56,6 @@ class RKMK(AbstractWrappedSolver):
 
     def order(self, terms) -> int | None:
         return self.solver.order(terms)
-
-    def strong_order(self, terms):
-        return self.solver.strong_order(terms)
-
-    def error_order(self, terms):
-        return self.solver.error_order(terms)
 
     @override
     def init(
@@ -103,7 +97,7 @@ class RKMK(AbstractWrappedSolver):
         if not isinstance(terms, GeometricTerm):
             raise TypeError("RKMK requires a GeometricTerm.")
         if not isinstance(terms.geometry, LieGroup):
-            raise TypeError("RKMK requires LieGroupOps.")
+            raise TypeError(f"RKMK requires a LieGroup in the GeometricTerm. Received {terms.geometry}.")
         if not isinstance(terms.inner, ODETerm):
             raise TypeError("RKMK currently only supports ODETerm inputs.")
 
