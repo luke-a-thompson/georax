@@ -18,7 +18,7 @@ from georax import (
 )
 from conftest import EuclideanOps
 from georax._geometry import Manifold
-from georax._solver.base import CommutatorFreeTableau
+from georax._solver.commutator_free import CommutatorFreeTableau
 from georax._term import GeometricTerm
 
 

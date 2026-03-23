@@ -3,10 +3,11 @@ from __future__ import annotations
 import jax.numpy as jnp
 from jaxtyping import Array
 
-from georax import CFEES25, CG2, Manifold
+from georax import CFEES25, CG2, CG4, Manifold
 
 SOLVERS = [
     ("cg2", CG2),
+    ("cg4", CG4),
     ("cfees25", CFEES25),
 ]
 

@@ -5,8 +5,8 @@ from typing import ClassVar, override
 import numpy as np
 from diffrax_lowstorage import LowStorageRecurrence
 
-from georax import GeometricTerm
-from georax._solver.base import AbstractLowStorageCommutatorFreeSolver
+from georax._solver.commutator_free import AbstractLowStorageCommutatorFreeSolver
+from georax._term import GeometricTerm
 
 _cf_ees25_recurrence = LowStorageRecurrence(
     A=np.array([-0.5, -2.0]),

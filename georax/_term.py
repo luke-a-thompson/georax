@@ -7,7 +7,7 @@ from diffrax._custom_types import Args, RealScalarLike, Y
 from diffrax._term import _VF, _Control
 from jaxtyping import Array
 
-from ._geometry import Manifold, LieGroup
+from georax._geometry import Manifold, LieGroup
 
 
 class GeometricTerm(AbstractTerm[_VF, _Control]):
