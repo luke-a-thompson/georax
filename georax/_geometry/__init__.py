@@ -1,4 +1,4 @@
-from ._lie_groups import SO
+from .special_orthogonal import SO
 from .base import Manifold, LieGroup
 
 __all__ = [

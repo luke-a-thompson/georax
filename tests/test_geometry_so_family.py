@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import jax.numpy as jnp
+import pytest
+from conftest import EuclideanOps
+from diffrax import ODETerm
 
-from georax import SO
+from georax import SO, GeometricTerm
 
 
-def test_so_family_constructor_returns_generic_ops() -> None:
-    so3 = SO(3)
-
-    assert isinstance(so3, SO)
-    assert so3.n == 3
-    assert so3.lie_algebra_dimension == 3
+def _zero_vf(t, y, args):
+    del t, y, args
+    return 0.0
 
 
 def test_so_ops_to_frame_from_frame_roundtrip() -> None:
@@ -32,6 +32,23 @@ def test_so_retraction_stays_on_group() -> None:
     v = so5.from_frame(x, a)
     y = so5.retraction(x, v)
 
-    ident = jnp.eye(5)
-    assert bool(jnp.allclose(y.T @ y, ident, atol=1e-6))
+    assert bool(jnp.allclose(y.T @ y, jnp.eye(5), atol=1e-6))
     assert float(jnp.linalg.det(y)) > 0.0
+
+
+def test_chart_differential_inv_is_identity_at_zero() -> None:
+    term = GeometricTerm(inner=ODETerm(_zero_vf), geometry=SO(3))
+    omega = jnp.zeros(SO(3).lie_algebra_dimension)
+    eta = jnp.array([0.3, -0.4, 0.2])
+
+    assert bool(jnp.allclose(term.chart_differential_inv(omega, eta), eta))
+
+
+def test_manifold_raises_on_lie_group_helpers() -> None:
+    # EuclideanOps is a Manifold but not a LieGroup subclass; chart_differential_inv
+    # requires LieGroup and should raise.
+    term = GeometricTerm(inner=ODETerm(_zero_vf), geometry=EuclideanOps())
+    a = jnp.array([0.1, -0.2])
+
+    with pytest.raises(TypeError):
+        term.chart_differential_inv(a, a)

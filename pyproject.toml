@@ -9,7 +9,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "jax>=0.9.1",
+    "jax[cuda]>=0.9.1",
     "diffrax>=0.7.1",
     "diffrax-lowstorage>=0.1.0",
 ]
