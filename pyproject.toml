@@ -17,8 +17,12 @@ dependencies = [
 [tool.uv.sources]
 diffrax = { git = "https://github.com/sammccallum/diffrax", rev = "aeb1335b5a6278e85a270231e0f97b8db4453ae6" }
 diffrax-lowstorage = {git = "https://github.com/luke-a-thompson/diffrax-lowstorage.git"}
+roughrax = {git = "https://github.com/luke-a-thompson/roughrax.git"}
 
 [project.optional-dependencies]
+roughrax = [
+    "roughrax"
+]
 dev = [
     "pytest",
     "matplotlib>=3.10.8",

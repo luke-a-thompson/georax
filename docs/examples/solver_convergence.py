@@ -24,7 +24,7 @@ import numpy as np
 from diffrax._custom_types import Args, RealScalarLike
 from jaxtyping import Array
 
-from georax import CFEES25, CG2, CG4, GeometricTerm, LieGroup
+from georax import CFEES25, CG2, CG4, CFEES27 GeometricTerm, LieGroup
 
 matplotlib.use("Agg")
 jax.config.update("jax_enable_x64", True)
@@ -226,7 +226,9 @@ def plot(
     error_fn = backward_error if backward else forward_error
     errors = [error_fn(term, solver, h, y0, y_exact) for h in hs]
     x = np.log10(np.asarray(hs, dtype=np.float64))
-    y = np.log10(np.maximum(np.asarray(errors, dtype=np.float64), np.finfo(np.float64).tiny))
+    y = np.log10(
+        np.maximum(np.asarray(errors, dtype=np.float64), np.finfo(np.float64).tiny)
+    )
     dx = np.array([x[0], x[-1]], dtype=np.float64)
 
     if backward and isinstance(solver, diffrax.AbstractReversibleSolver):
@@ -264,6 +266,7 @@ def plot_grid(hs: list[float], output_dir: Path) -> Path:
         ("CG2", CG2()),
         ("CG4", CG4()),
         ("CF-EES(2,5;1/4)", CFEES25()),
+        ("CF-EES(2,7;1/4)", CFEES27()),
     ]
 
     fig, axes = plt.subplots(len(solvers), 2, figsize=(10, 3.2 * len(solvers)))

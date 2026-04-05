@@ -97,7 +97,9 @@ class RKMK(AbstractWrappedSolver):
         if not isinstance(terms, GeometricTerm):
             raise TypeError("RKMK requires a GeometricTerm.")
         if not isinstance(terms.geometry, LieGroup):
-            raise TypeError(f"RKMK requires a LieGroup in the GeometricTerm. Received {terms.geometry}.")
+            raise TypeError(
+                f"RKMK requires a LieGroup in the GeometricTerm. Received {terms.geometry}."
+            )
         if not isinstance(terms.inner, ODETerm):
             raise TypeError("RKMK currently only supports ODETerm inputs.")
 

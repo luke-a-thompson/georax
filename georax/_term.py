@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import override
 
+import equinox as eqx
 from diffrax import AbstractTerm
 from diffrax._custom_types import Args, RealScalarLike, Y
 from diffrax._term import _VF, _Control
@@ -19,6 +21,12 @@ class GeometricTerm(AbstractTerm[_VF, _Control]):
 
     inner: AbstractTerm[_VF, _Control]
     geometry: Manifold
+    coeffs_fn: Callable[[RealScalarLike, Array, Args], Array] | None = eqx.field(
+        static=True, default=None
+    )
+    coeffs_prod_fn: (
+        Callable[[RealScalarLike, Array, Args, _Control], Array] | None
+    ) = eqx.field(static=True, default=None)
 
     @override
     def vf(self, t: RealScalarLike, y: Y, args: Args) -> _VF:
@@ -38,6 +46,8 @@ class GeometricTerm(AbstractTerm[_VF, _Control]):
 
     def coeffs(self, t: RealScalarLike, x: Array, args: Args) -> Array:
         """Return frame coefficients a such that vf(t, x, args) = sum_d a_d E_d(x)."""
+        if self.coeffs_fn is not None:
+            return self.coeffs_fn(t, x, args)
         v = self.inner.vf(t, x, args)
         return self.geometry.to_frame(x, v)
 
@@ -45,6 +55,8 @@ class GeometricTerm(AbstractTerm[_VF, _Control]):
         self, t: RealScalarLike, x: Array, args: Args, control: _Control
     ) -> Array:
         """Return frame coefficients of the controlled tangent increment."""
+        if self.coeffs_prod_fn is not None:
+            return self.coeffs_prod_fn(t, x, args, control)
         v = self.inner.vf_prod(t, x, args, control)
         return self.geometry.to_frame(x, v)
 
@@ -57,6 +69,9 @@ class GeometricTerm(AbstractTerm[_VF, _Control]):
 
         Approximates exp(sum_d a_d E_d) . x by retracting sum_d a_d E_d(x).
         """
+        geometry_frozen_flow = getattr(self.geometry, "frozen_flow", None)
+        if callable(geometry_frozen_flow):
+            return geometry_frozen_flow(x, a)
         v = self.geometry.from_frame(x, a)
         return self.geometry.retraction(x, v)
 

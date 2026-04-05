@@ -103,7 +103,6 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
         y_base: Array,
         exp_rows: tuple[np.ndarray, ...],
         stages: list[Array],
-        control: Array,
         geometric_term: GeometricTerm,
     ) -> Array:
         y = y_base
@@ -111,8 +110,7 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
             coeffs = jnp.zeros_like(stages[0])
             for weight, stage in zip(row, stages, strict=True):
                 coeffs = coeffs + jnp.asarray(weight, dtype=stage.dtype) * stage
-            flow_coeffs = jnp.asarray(control, dtype=coeffs.dtype) * coeffs
-            y = geometric_term.frozen_flow(y, flow_coeffs)
+            y = geometric_term.frozen_flow(y, coeffs)
         return y
 
     @override
@@ -139,15 +137,14 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
                 y_stage = y0_array
             else:
                 y_stage = self._apply_exp_product(
-                    y0_array, exp_rows, stages, control, geometric_term
+                    y0_array, exp_rows, stages, geometric_term
                 )
 
             t_stage = t1 if c_i == 1.0 else t0 + c_i * dt
-            stage_vf = terms.vf(t_stage, y_stage, args)
-            stages.append(geometric_term.geometry.to_frame(y_stage, stage_vf))
+            stages.append(geometric_term.coeffs_prod(t_stage, y_stage, args, control))
 
         y1 = self._apply_exp_product(
-            y0_array, self.tableau.final_exps, stages, control, geometric_term
+            y0_array, self.tableau.final_exps, stages, geometric_term
         )
 
         y_error = None
@@ -156,7 +153,6 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
                 y0_array,
                 self.tableau.embedded_final_exps,
                 stages,
-                control,
                 geometric_term,
             )
             # This ambient subtraction is acceptable for now; a geometry-aware
@@ -198,12 +194,12 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
         c = jnp.asarray(self.recurrence.C)
 
         dt = t1 - t0
-        control = jnp.asarray(terms.contr(t0, t1))
+        control = terms.contr(t0, t1)
         geometric_term = self._unwrap_geometric_term(terms)
         y0_array = y0
 
         t_stage0 = t1 if self.recurrence.C[0] == 1.0 else t0 + c[0] * dt
-        tmp = control * geometric_term.coeffs(t_stage0, y0_array, args)
+        tmp = geometric_term.coeffs_prod(t_stage0, y0_array, args, control)
         y1 = geometric_term.frozen_flow(
             y0_array, jnp.asarray(b[0], dtype=tmp.dtype) * tmp
         )
@@ -215,7 +211,7 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
                 if self.recurrence.C[stage_index] == 1.0
                 else t0 + c[stage_index] * dt
             )
-            coeffs = control * geometric_term.coeffs(t_stage, y1, args)
+            coeffs = geometric_term.coeffs_prod(t_stage, y1, args, control)
             tmp = jnp.asarray(a[stage_index - 1], dtype=tmp.dtype) * tmp + coeffs
             if (
                 self.recurrence.penultimate_stage_error
