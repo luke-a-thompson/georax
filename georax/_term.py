@@ -24,9 +24,9 @@ class GeometricTerm(AbstractTerm[_VF, _Control]):
     coeffs_fn: Callable[[RealScalarLike, Array, Args], Array] | None = eqx.field(
         static=True, default=None
     )
-    coeffs_prod_fn: (
-        Callable[[RealScalarLike, Array, Args, _Control], Array] | None
-    ) = eqx.field(static=True, default=None)
+    coeffs_prod_fn: Callable[[RealScalarLike, Array, Args, _Control], Array] | None = (
+        eqx.field(static=True, default=None)
+    )
 
     @override
     def vf(self, t: RealScalarLike, y: Y, args: Args) -> _VF:

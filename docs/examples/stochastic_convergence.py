@@ -49,18 +49,22 @@ _ees25_recurrence = LowStorageRecurrence(
 
 _ees27_recurrence = LowStorageRecurrence(
     A=np.array([1.0 - np.sqrt(2.0), -1.0, -(1.0 + np.sqrt(2.0))]),
-    B=np.array([
-        0.5 * (2.0 - np.sqrt(2.0)),
-        0.5 * np.sqrt(2.0),
-        0.5 * np.sqrt(2.0),
-        0.25 * (2.0 - np.sqrt(2.0)),
-    ]),
-    C=np.array([
-        0.0,
-        0.5 * (2.0 - np.sqrt(2.0)),
-        0.5 * np.sqrt(2.0),
-        1.0,
-    ]),
+    B=np.array(
+        [
+            0.5 * (2.0 - np.sqrt(2.0)),
+            0.5 * np.sqrt(2.0),
+            0.5 * np.sqrt(2.0),
+            0.25 * (2.0 - np.sqrt(2.0)),
+        ]
+    ),
+    C=np.array(
+        [
+            0.0,
+            0.5 * (2.0 - np.sqrt(2.0)),
+            0.5 * np.sqrt(2.0),
+            1.0,
+        ]
+    ),
 )
 
 
@@ -198,9 +202,7 @@ def spd_homogeneous_columns(x: Array) -> Array:
     return jnp.stack((col1, col2), axis=-1)
 
 
-def spd_coeffs_prod(
-    t: RealScalarLike, x: Array, args: Args, control: Array
-) -> Array:
+def spd_coeffs_prod(t: RealScalarLike, x: Array, args: Args, control: Array) -> Array:
     del t, args
     s1, s2 = spd_sym_lift_matrices(x)
     coeff_matrix = control[0] * s1 + control[1] * s2
@@ -249,7 +251,11 @@ def make_matrix_method_runner(
     coeffs_prod_fn: Callable[[RealScalarLike, Array, Args, Array], Array] | None = None,
 ) -> Callable[..., np.ndarray]:
     stepsize_controller = diffrax.ConstantStepSize()
-    adjoint = ReversibleAdjoint() if isinstance(solver, AbstractReversibleSolver) else diffrax.RecursiveCheckpointAdjoint()
+    adjoint = (
+        ReversibleAdjoint()
+        if isinstance(solver, AbstractReversibleSolver)
+        else diffrax.RecursiveCheckpointAdjoint()
+    )
 
     @lru_cache(maxsize=None)
     def _compiled_runner(num_points: int):
@@ -320,7 +326,11 @@ def make_so3_method_runner(solver) -> Callable[..., np.ndarray]:
 
 def make_euclidean_method_runner(solver) -> Callable[..., np.ndarray]:
     stepsize_controller = diffrax.ConstantStepSize()
-    adjoint = ReversibleAdjoint() if isinstance(solver, AbstractReversibleSolver) else diffrax.RecursiveCheckpointAdjoint()
+    adjoint = (
+        ReversibleAdjoint()
+        if isinstance(solver, AbstractReversibleSolver)
+        else diffrax.RecursiveCheckpointAdjoint()
+    )
 
     @lru_cache(maxsize=None)
     def _compiled_runner(num_points: int):

@@ -15,18 +15,22 @@ from georax._term import GeometricTerm
 
 _cf_ees27_recurrence = LowStorageRecurrence(
     A=np.array([1.0 - np.sqrt(2.0), -1.0, -(1.0 + np.sqrt(2.0))]),
-    B=np.array([
-        0.5 * (2.0 - np.sqrt(2.0)),
-        0.5 * np.sqrt(2.0),
-        0.5 * np.sqrt(2.0),
-        0.25 * (2.0 - np.sqrt(2.0)),
-    ]),
-    C=np.array([
-        0.0,
-        0.5 * (2.0 - np.sqrt(2.0)),
-        0.5 * np.sqrt(2.0),
-        1.0,
-    ]),
+    B=np.array(
+        [
+            0.5 * (2.0 - np.sqrt(2.0)),
+            0.5 * np.sqrt(2.0),
+            0.5 * np.sqrt(2.0),
+            0.25 * (2.0 - np.sqrt(2.0)),
+        ]
+    ),
+    C=np.array(
+        [
+            0.0,
+            0.5 * (2.0 - np.sqrt(2.0)),
+            0.5 * np.sqrt(2.0),
+            1.0,
+        ]
+    ),
 )
 
 _SolverState = Y

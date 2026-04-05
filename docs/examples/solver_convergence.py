@@ -24,7 +24,7 @@ import numpy as np
 from diffrax._custom_types import Args, RealScalarLike
 from jaxtyping import Array
 
-from georax import CFEES25, CG2, CG4, CFEES27 GeometricTerm, LieGroup
+from georax import CFEES25, CFEES27, CG2, CG4, GeometricTerm, LieGroup
 
 matplotlib.use("Agg")
 jax.config.update("jax_enable_x64", True)

@@ -58,7 +58,9 @@ def test_spd_homogeneous_control_term_step_preserves_spd() -> None:
     assert _is_spd(y1)
 
 
-def test_spd_homogeneous_coeffs_prod_override_recovers_exact_algebra_increment() -> None:
+def test_spd_homogeneous_coeffs_prod_override_recovers_exact_algebra_increment() -> (
+    None
+):
     geometry = SPDHomogeneous(2)
     control = jnp.array([0.04, -0.03])
     y0 = jnp.array([[1.5, 0.1], [0.1, 1.2]])
