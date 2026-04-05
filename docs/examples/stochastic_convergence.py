@@ -24,12 +24,10 @@ import matplotlib.markers as mkr
 import matplotlib.pyplot as plt
 import numpy as np
 from diffrax import AbstractReversibleSolver, ReversibleAdjoint
-from diffrax_lowstorage import LowStorageRecurrence
-from diffrax_lowstorage.base import LowStorageSolver
 from diffrax._custom_types import Args, RealScalarLike
 from jaxtyping import Array
 
-from georax import CFEES25, CFEES27, GeometricTerm, LieGroup, SPDHomogeneous
+from georax import CFEES25, CFEES27, SO, SPD, GeometricTerm
 
 matplotlib.use("Agg")
 jax.config.update("jax_enable_x64", True)
@@ -37,143 +35,14 @@ jax.config.update("jax_enable_x64", True)
 T0 = 0.0
 T1 = 1.0
 SIGMA = 0.2
-GEOMETRY = SPDHomogeneous(2)
+GEOMETRY = SPD(2)
 X0 = jnp.array([[1.4, 0.2], [0.2, 0.9]], dtype=jnp.float64)
 SO3_X0 = jnp.eye(3, dtype=jnp.float64)
-
-_ees25_recurrence = LowStorageRecurrence(
-    A=np.array([-0.5, -2.0]),
-    B=np.array([0.5, 1.0, 0.25]),
-    C=np.array([0.0, 0.5, 1.0]),
-)
-
-_ees27_recurrence = LowStorageRecurrence(
-    A=np.array([1.0 - np.sqrt(2.0), -1.0, -(1.0 + np.sqrt(2.0))]),
-    B=np.array(
-        [
-            0.5 * (2.0 - np.sqrt(2.0)),
-            0.5 * np.sqrt(2.0),
-            0.5 * np.sqrt(2.0),
-            0.25 * (2.0 - np.sqrt(2.0)),
-        ]
-    ),
-    C=np.array(
-        [
-            0.0,
-            0.5 * (2.0 - np.sqrt(2.0)),
-            0.5 * np.sqrt(2.0),
-            1.0,
-        ]
-    ),
-)
-
-
-class EES25(LowStorageSolver):
-    recurrance = _ees25_recurrence
-
-    def order(self, terms):
-        del terms
-        return 2
-
-    def antisymmetric_order(self, terms):
-        del terms
-        return 5
-
-
-class EES27(LowStorageSolver):
-    recurrance = _ees27_recurrence
-
-    def order(self, terms):
-        del terms
-        return 2
-
-    def antisymmetric_order(self, terms):
-        del terms
-        return 7
-
-
-class SO3ExactExp(LieGroup):
-    @property
-    def lie_algebra_dimension(self) -> int:
-        return 3
-
-    def frame(self, x: Array) -> Array:
-        basis = jnp.stack(
-            [
-                jnp.array([[0.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]),
-                jnp.array([[0.0, 0.0, 1.0], [0.0, 0.0, 0.0], [-1.0, 0.0, 0.0]]),
-                jnp.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 0.0]]),
-            ],
-            axis=-1,
-        )
-        return jnp.einsum("ab,bck->ack", x, basis.astype(x.dtype))
-
-    def to_frame(self, x: Array, v: Array) -> Array:
-        omega = x.T @ v
-        return jnp.array([omega[2, 1], omega[0, 2], omega[1, 0]], dtype=v.dtype)
-
-    def from_frame(self, x: Array, a: Array) -> Array:
-        a = jnp.asarray(a, dtype=x.dtype)
-        omega = jnp.array(
-            [
-                [0.0, -a[2], a[1]],
-                [a[2], 0.0, -a[0]],
-                [-a[1], a[0], 0.0],
-            ],
-            dtype=x.dtype,
-        )
-        return x @ omega
-
-    def frozen_flow(self, x: Array, a: Array) -> Array:
-        a = jnp.asarray(a, dtype=x.dtype)
-        omega = jnp.array(
-            [
-                [0.0, -a[2], a[1]],
-                [a[2], 0.0, -a[0]],
-                [-a[1], a[0], 0.0],
-            ],
-            dtype=x.dtype,
-        )
-        theta_sq = jnp.sum(omega * omega) / 2.0
-        theta = jnp.sqrt(theta_sq)
-        sin_over_theta = jnp.where(
-            theta_sq > 1e-16,
-            jnp.sin(theta) / theta,
-            1.0 - theta_sq / 6.0 + theta_sq * theta_sq / 120.0,
-        )
-        one_minus_cos_over_theta_sq = jnp.where(
-            theta_sq > 1e-16,
-            (1.0 - jnp.cos(theta)) / theta_sq,
-            0.5 - theta_sq / 24.0 + theta_sq * theta_sq / 720.0,
-        )
-        ident = jnp.eye(3, dtype=x.dtype)
-        exp_omega = (
-            ident
-            + sin_over_theta * omega
-            + one_minus_cos_over_theta_sq * (omega @ omega)
-        )
-        return x @ exp_omega
-
-    def retraction(self, x: Array, v: Array) -> Array:
-        return self.frozen_flow(x, self.to_frame(x, v))
-
-    def chart_differential_inv(self, a: Array, b: Array) -> Array:
-        del a
-        return b
-
-
-SO3_GEOMETRY = SO3ExactExp()
+SO3_GEOMETRY = SO(3)
 
 
 def sym(matrix: Array) -> Array:
     return 0.5 * (matrix + matrix.T)
-
-
-def spd_sqrt(matrix: Array) -> Array:
-    matrix = sym(matrix)
-    evals, evecs = jnp.linalg.eigh(matrix)
-    evals = jnp.clip(evals, min=jnp.finfo(matrix.dtype).eps)
-    return (evecs * jnp.sqrt(evals)) @ evecs.T
 
 
 def spd_sym_lift_matrices(x: Array) -> tuple[Array, Array]:
@@ -195,28 +64,31 @@ def spd_sym_lift_matrices(x: Array) -> tuple[Array, Array]:
     return SIGMA * sym(s1), SIGMA * sym(s2)
 
 
-def spd_homogeneous_columns(x: Array) -> Array:
+def spd_tangent_columns(x: Array) -> Array:
     s1, s2 = spd_sym_lift_matrices(x)
-    col1 = GEOMETRY.from_frame(x, s1.reshape(-1))
-    col2 = GEOMETRY.from_frame(x, s2.reshape(-1))
+    x = sym(jnp.asarray(x))
+    col1 = sym(s1 @ x + x @ s1)
+    col2 = sym(s2 @ x + x @ s2)
     return jnp.stack((col1, col2), axis=-1)
 
 
 def spd_coeffs_prod(t: RealScalarLike, x: Array, args: Args, control: Array) -> Array:
     del t, args
-    s1, s2 = spd_sym_lift_matrices(x)
-    coeff_matrix = control[0] * s1 + control[1] * s2
-    return coeff_matrix.reshape(-1)
+    tangent_columns = spd_tangent_columns(x)
+    tangent = (
+        control[0] * tangent_columns[..., 0] + control[1] * tangent_columns[..., 1]
+    )
+    return GEOMETRY.to_frame(x, tangent)
 
 
 def vector_field(t, x, args):
     del t, args
-    return spd_homogeneous_columns(x)
+    return spd_tangent_columns(x)
 
 
 def so3_vector_field(t: RealScalarLike, x: Array, args: Args) -> Array:
     del t, args
-    coeffs = SIGMA * jnp.array(
+    old_coeffs = SIGMA * jnp.array(
         [
             [0.9 + 0.2 * x[0, 0], 0.15 + 0.25 * x[0, 1]],
             [0.25 + 0.2 * x[1, 2], -0.35 + 0.2 * x[1, 1]],
@@ -224,12 +96,13 @@ def so3_vector_field(t: RealScalarLike, x: Array, args: Args) -> Array:
         ],
         dtype=x.dtype,
     )
+    # Map legacy local coordinates [B1, B2, B3] to georax SO(3) basis:
+    # [B1, B2, B3] = [-K12, K02, -K01].
+    coeffs = jnp.stack(
+        (-old_coeffs[2, :], old_coeffs[1, :], -old_coeffs[0, :]),
+        axis=0,
+    )
     return jnp.einsum("ija,ab->ijb", SO3_GEOMETRY.frame(x), coeffs)
-
-
-def euclidean_vector_field(t, y, args):
-    del t, args
-    return jnp.stack([jnp.cos(y), jnp.sin(y)], axis=-1)
 
 
 def get_2d_bm(num_steps: int, length: float, key: jax.Array) -> np.ndarray:
@@ -324,74 +197,13 @@ def make_so3_method_runner(solver) -> Callable[..., np.ndarray]:
     )
 
 
-def make_euclidean_method_runner(solver) -> Callable[..., np.ndarray]:
-    stepsize_controller = diffrax.ConstantStepSize()
-    adjoint = (
-        ReversibleAdjoint()
-        if isinstance(solver, AbstractReversibleSolver)
-        else diffrax.RecursiveCheckpointAdjoint()
-    )
-
-    @lru_cache(maxsize=None)
-    def _compiled_runner(num_points: int):
-        if num_points < 2:
-            raise ValueError("Need at least two control points.")
-
-        ts = jnp.linspace(T0, T1, num_points, dtype=jnp.float64)
-        dt0 = float((T1 - T0) / (num_points - 1))
-        saveat = diffrax.SaveAt(ts=ts)
-
-        @jax.jit
-        def _run(x: jax.Array, y0: jax.Array) -> jax.Array:
-            term = diffrax.ControlTerm(
-                vector_field=euclidean_vector_field,
-                control=diffrax.LinearInterpolation(ts=ts, ys=x),
-            )
-            solution = diffrax.diffeqsolve(
-                term,
-                solver,
-                t0=T0,
-                t1=T1,
-                dt0=dt0,
-                y0=y0,
-                saveat=saveat,
-                stepsize_controller=stepsize_controller,
-                adjoint=adjoint,
-                max_steps=num_points + 4,
-                throw=True,
-            )
-            assert solution.ys is not None
-            return solution.ys
-
-        return _run
-
-    def _run(x: np.ndarray, y0: float | None = None) -> np.ndarray:
-        x_arr = jnp.asarray(np.asarray(x, dtype=np.float64), dtype=jnp.float64)
-        runner = _compiled_runner(int(x_arr.shape[0]))
-        if y0 is None:
-            y0 = 1.0
-        y = runner(x_arr, jnp.asarray(y0, dtype=jnp.float64))
-        return np.asarray(y, dtype=np.float64).reshape(-1)
-
-    return _run
-
-
 def get_error(y_exact: np.ndarray, y_vals: np.ndarray, step: int) -> float:
     true_vals = y_exact[::step]
     return float(np.max(np.linalg.norm(true_vals - y_vals, axis=(1, 2))))
 
 
-def get_scalar_error(y_exact: np.ndarray, y_vals: np.ndarray, step: int) -> float:
-    true_vals = y_exact[::step]
-    return float(np.max(np.abs(true_vals - y_vals)))
-
-
 def matrix_distance(y0: np.ndarray, y1: np.ndarray) -> float:
     return float(np.linalg.norm(y0 - y1))
-
-
-def scalar_distance(y0: np.ndarray | float, y1: np.ndarray | float) -> float:
-    return abs(float(y0) - float(y1))
 
 
 def compute_error_curves(
@@ -524,20 +336,6 @@ def plot_grid(
             make_so3_method_runner,
             get_error,
             matrix_distance,
-        ),
-        (
-            "R manifold EES(2,5)",
-            EES25(),
-            make_euclidean_method_runner,
-            get_scalar_error,
-            scalar_distance,
-        ),
-        (
-            "R manifold EES(2,7)",
-            EES27(),
-            make_euclidean_method_runner,
-            get_scalar_error,
-            scalar_distance,
         ),
     ]
 

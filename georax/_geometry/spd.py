@@ -3,29 +3,16 @@ from __future__ import annotations
 from typing import override
 
 import equinox as eqx
+from diffrax._custom_types import RealScalarLike
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array
 
-from .base import Manifold
+from .base import LocalFlow, Manifold, flow_order
 
 
 def _sym(a: Array) -> Array:
     return 0.5 * (a + a.T)
-
-
-def _matrix_sqrt_spd(x: Array) -> Array:
-    x = _sym(x)
-    evals, evecs = jnp.linalg.eigh(x)
-    evals = jnp.clip(evals, min=jnp.finfo(x.dtype).eps)
-    return (evecs * jnp.sqrt(evals)) @ evecs.T
-
-
-def _matrix_invsqrt_spd(x: Array) -> Array:
-    x = _sym(x)
-    evals, evecs = jnp.linalg.eigh(x)
-    evals = jnp.clip(evals, min=jnp.finfo(x.dtype).eps)
-    return (evecs * jnp.reciprocal(jnp.sqrt(evals))) @ evecs.T
 
 
 def _matrix_exp_sym(s: Array) -> Array:
@@ -34,8 +21,29 @@ def _matrix_exp_sym(s: Array) -> Array:
     return (evecs * jnp.exp(evals)) @ evecs.T
 
 
+class CongruenceExpFlow(LocalFlow):
+    order: flow_order = "exact"
+    inverse_order: flow_order = "exact"
+
+    def forward(self, x: Array, a: Array, geometry: "SPD") -> Array:
+        x = _sym(jnp.asarray(x))
+        lift = geometry._coords_to_sym(a)
+        g = _matrix_exp_sym(lift)
+        return _sym(g @ x @ g)
+
+
 class SPD(Manifold):
-    """SPD(n) with scaled-``vech`` coordinates and AIRM retraction."""
+    """SPD(n) with scaled-``vech`` symmetric-lift coordinates.
+
+    Coefficients are represented in the symmetric matrix algebra. The induced
+    infinitesimal action is
+
+        E_A(x) = A x + x A,
+
+    and the frozen flow is the exact congruence action
+
+        Phi_A(x) = exp(A) x exp(A).
+    """
 
     n: int = eqx.field(static=True)
     _diag_i: Array
@@ -43,7 +51,7 @@ class SPD(Manifold):
     _upper_j: Array
     _basis: Array
 
-    def __init__(self, n: int):
+    def __init__(self, n: int, *, flow: LocalFlow | None = None):
         n = int(n)
         if n < 1:
             raise ValueError("SPD(n) requires n >= 1.")
@@ -65,6 +73,9 @@ class SPD(Manifold):
         object.__setattr__(self, "_upper_i", jnp.asarray(upper_i))
         object.__setattr__(self, "_upper_j", jnp.asarray(upper_j))
         object.__setattr__(self, "_basis", jnp.asarray(basis))
+        object.__setattr__(
+            self, "flow", CongruenceExpFlow() if flow is None else flow
+        )
 
     @property
     def dimension(self) -> int:
@@ -90,27 +101,36 @@ class SPD(Manifold):
 
     @override
     def frame(self, x: Array) -> Array:
-        sqrt_x = _matrix_sqrt_spd(jnp.asarray(x))
+        x = _sym(jnp.asarray(x))
         basis = jnp.asarray(self._basis, dtype=x.dtype)
-        return jnp.einsum("ab,bck,cd->adk", sqrt_x, basis, sqrt_x)
+        left = jnp.einsum("abk,bc->ack", basis, x)
+        right = jnp.einsum("ab,bck->ack", x, basis)
+        return _sym(left + right)
 
     @override
     def to_frame(self, x: Array, v: Array) -> Array:
-        invsqrt_x = _matrix_invsqrt_spd(jnp.asarray(x))
-        tangent = invsqrt_x @ _sym(jnp.asarray(v)) @ invsqrt_x
-        return self._sym_to_coords(tangent)
+        x = _sym(jnp.asarray(x))
+        v = _sym(jnp.asarray(v))
+        evals, evecs = jnp.linalg.eigh(x)
+        v_hat = evecs.T @ v @ evecs
+        denom = evals[:, None] + evals[None, :]
+        lift_hat = v_hat / denom
+        lift = _sym(evecs @ lift_hat @ evecs.T)
+        return self._sym_to_coords(lift)
 
     @override
     def from_frame(self, x: Array, a: Array) -> Array:
-        sqrt_x = _matrix_sqrt_spd(jnp.asarray(x))
-        tangent = self._coords_to_sym(a)
-        return _sym(sqrt_x @ tangent @ sqrt_x)
+        x = _sym(jnp.asarray(x))
+        lift = self._coords_to_sym(a)
+        return _sym(lift @ x + x @ lift)
 
     @override
     def retraction(self, x: Array, v: Array) -> Array:
-        x = _sym(jnp.asarray(x))
-        v = _sym(jnp.asarray(v))
-        sqrt_x = _matrix_sqrt_spd(x)
-        invsqrt_x = _matrix_invsqrt_spd(x)
-        transported = invsqrt_x @ v @ invsqrt_x
-        return _sym(sqrt_x @ _matrix_exp_sym(transported) @ sqrt_x)
+        return self.frozen_flow(x, self.to_frame(x, v))
+
+    @override
+    def select_flow_method(self, required_order: RealScalarLike) -> LocalFlow:
+        del required_order
+        flow: LocalFlow = CongruenceExpFlow()
+        object.__setattr__(self, "flow", flow)
+        return flow

@@ -50,7 +50,7 @@ class CFEES27(AbstractLowStorageCommutatorFreeSolver, AbstractReversibleSolver):
         y0: Y,
         args: Args,
     ) -> _SolverState:
-        del terms, t0, t1, args
+        super().init(terms, t0, t1, y0, args)
         return y0
 
     @override

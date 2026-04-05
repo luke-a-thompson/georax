@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from abc import abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import ClassVar, override
@@ -76,7 +75,23 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
         y0: Y,
         args: Args,
     ) -> None:
-        del terms, t0, t1, y0, args
+        del t0, t1, y0, args
+        geometric_term = self._unwrap_geometric_term(terms)
+        required_order = self.error_order(geometric_term)
+        if hasattr(self, "antisymmetric_order"):
+            antisym_order = self.antisymmetric_order(geometric_term)
+            if required_order is None:
+                required_order = antisym_order
+            else:
+                required_order = max(int(required_order), antisym_order)
+        if required_order is None:
+            required_order = self.order(geometric_term)
+        if required_order is None:
+            raise ValueError(
+                f"Got required_order of type {type(required_order)} for solver {self}, expected {RealScalarLike}"
+            )
+        geometric_term.geometry.select_flow_method(required_order)
+        del terms, geometric_term
         return None
 
     @override
@@ -161,11 +176,6 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
 
         dense_info = dict(y0=y0, y1=y1)
         return y1, y_error, dense_info, None, RESULTS.successful
-
-    @abstractmethod
-    def order(self, terms: GeometricTerm) -> int | None:
-        del terms
-        """Order of convergence for ODEs."""
 
 
 class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
