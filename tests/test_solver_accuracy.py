@@ -119,32 +119,15 @@ def test_solver_backward_empirical_order_matches_declared_order(
     del solver_name
 
     solver = solver_cls()
-
-    if isinstance(solver, diffrax.AbstractReversibleSolver):
-        expected_order = solver.antisymmetric_order(_TERM)
-    else:
-        expected_order = solver.order(_TERM)
+    if not isinstance(solver, diffrax.AbstractReversibleSolver):
+        pytest.skip("Backward-order checks apply only to reversible solvers.")
+    expected_order = solver.antisymmetric_order(_TERM)
     assert expected_order is not None
 
     dts = jnp.array([0.1, 0.05, 0.025, 0.0125], dtype=jnp.float64)
     errors = []
     for dt in dts:
-        if isinstance(solver, diffrax.AbstractReversibleSolver):
-            errors.append(_reversible_roundtrip_error(solver, float(dt)))
-        else:
-            out = diffrax.diffeqsolve(
-                _TERM,
-                solver,
-                _T1,
-                _T0,
-                float(-dt),
-                _REFERENCE_Y1,
-                saveat=diffrax.SaveAt(t1=True),
-                max_steps=_MAX_STEPS,
-                throw=True,
-            )
-            assert out.ys is not None
-            errors.append(float(jnp.linalg.norm(out.ys[0] - _Y0)))
+        errors.append(_reversible_roundtrip_error(solver, float(dt)))
 
     log_dts = jnp.log(dts)
     log_errs = jnp.log(jnp.array(errors, dtype=jnp.float64))

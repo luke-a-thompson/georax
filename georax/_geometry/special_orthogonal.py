@@ -89,7 +89,7 @@ class SO(LieGroup):
         n = int(n)
         if n < 2:
             raise ValueError("SO(n) requires n >= 2.")
-            
+
         upper_i, upper_j = np.triu_indices(n, k=1)
         d = upper_i.size
         basis = np.zeros((n, n, d), dtype=float)

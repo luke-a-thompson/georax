@@ -73,9 +73,7 @@ class SPD(Manifold):
         object.__setattr__(self, "_upper_i", jnp.asarray(upper_i))
         object.__setattr__(self, "_upper_j", jnp.asarray(upper_j))
         object.__setattr__(self, "_basis", jnp.asarray(basis))
-        object.__setattr__(
-            self, "flow", CongruenceExpFlow() if flow is None else flow
-        )
+        object.__setattr__(self, "flow", CongruenceExpFlow() if flow is None else flow)
 
     @property
     def dimension(self) -> int:
@@ -105,7 +103,7 @@ class SPD(Manifold):
         basis = jnp.asarray(self._basis, dtype=x.dtype)
         left = jnp.einsum("abk,bc->ack", basis, x)
         right = jnp.einsum("ab,bck->ack", x, basis)
-        return _sym(left + right)
+        return left + right
 
     @override
     def to_frame(self, x: Array, v: Array) -> Array:

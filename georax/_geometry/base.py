@@ -4,7 +4,7 @@ from abc import abstractmethod
 from typing import Literal
 
 import equinox as eqx
-from diffrax._custom_types import VF, Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
+from diffrax._custom_types import RealScalarLike
 from jaxtyping import Array
 
 flow_order = int | Literal["exact"]

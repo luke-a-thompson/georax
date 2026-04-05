@@ -1,7 +1,6 @@
-from .special_orthogonal import SO
+from .base import LieGroup, LocalFlow, Manifold
 from .spd import SPD
-from .spd_homogeneous import SPDHomogeneous
-from .base import Manifold, LieGroup, LocalFlow
+from .special_orthogonal import SO
 
 __all__ = [
     "Manifold",
@@ -9,5 +8,4 @@ __all__ = [
     "LocalFlow",
     "SO",
     "SPD",
-    "SPDHomogeneous",
 ]

@@ -24,6 +24,7 @@ from georax import (
     AbstractLowStorageCommutatorFreeSolver,
     CFEES25,
     CG2,
+    LocalFlow,
     SPD,
 )
 from georax._geometry import Manifold
@@ -32,7 +33,7 @@ from georax._term import GeometricTerm
 
 
 class AffineRetractionOps(Manifold):
-    scale: float
+    scale: float = 1.0
 
     def frame(self, x: Array) -> Array:
         return jnp.eye(x.shape[0], dtype=x.dtype)
@@ -47,6 +48,20 @@ class AffineRetractionOps(Manifold):
 
     def retraction(self, x: Array, v: Array) -> Array:
         return self.scale * x + v
+
+    def select_flow_method(self, required_order) -> LocalFlow:
+        del required_order
+        flow: LocalFlow = _AffineRetractionFlow()
+        object.__setattr__(self, "flow", flow)
+        return flow
+
+
+class _AffineRetractionFlow(LocalFlow):
+    order: int | str = "exact"
+    inverse_order: int | str = "exact"
+
+    def forward(self, x: Array, a: Array, geometry: AffineRetractionOps) -> Array:
+        return geometry.retraction(x, geometry.from_frame(x, a))
 
 
 class TableauSolver(AbstractCommutatorFreeSolver):

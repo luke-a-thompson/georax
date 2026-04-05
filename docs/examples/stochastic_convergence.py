@@ -3,18 +3,9 @@
 from __future__ import annotations
 
 import argparse
-import os
-import sys
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
-
-os.environ.setdefault("JAX_PLATFORMS", "cpu")
-os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
-
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 import diffrax
 import jax

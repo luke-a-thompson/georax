@@ -8,7 +8,7 @@ from georax._solver import (
     AbstractLowStorageCommutatorFreeSolver,
 )
 
-from ._geometry import SO, SPD, LieGroup, LocalFlow, Manifold, SPDHomogeneous
+from ._geometry import SO, SPD, LieGroup, LocalFlow, Manifold
 from ._term import GeometricTerm
 
 __all__ = [
@@ -24,6 +24,5 @@ __all__ = [
     "LocalFlow",
     "SO",
     "SPD",
-    "SPDHomogeneous",
     "GeometricTerm",
 ]

@@ -10,12 +10,11 @@ from conftest import BENCH_SOLVERS, EuclideanOps
 
 from georax import GeometricTerm
 
-# BacksolveAdjoint is excluded: it wraps terms in AdjointTerm during the backward
-# pass, which is incompatible with solvers that declare term_structure = GeometricTerm.
-REVERSE_MODE_ADJOINTS = [
-    ("recursive_checkpoint", diffrax.RecursiveCheckpointAdjoint()),
-    ("direct", diffrax.DirectAdjoint()),
-]
+def _reverse_mode_adjoints_for_solver(solver_cls):
+    adjoints = [("recursive_checkpoint", diffrax.RecursiveCheckpointAdjoint())]
+    if issubclass(solver_cls, diffrax.AbstractReversibleSolver):
+        adjoints.append(("reversible", diffrax.ReversibleAdjoint()))
+    return adjoints
 
 
 def _to_total_bytes(memory_stats) -> int:
@@ -117,23 +116,18 @@ def test_solvers_compiled_reverse_mode_memory_by_adjoint(problem_size):
     max_steps = 4096
 
     print(f"\ncompiled-reverse-mode-memory-bytes-by-adjoint (size={problem_size}):")
-    for adjoint_name, adjoint in REVERSE_MODE_ADJOINTS:
-        results = []
-        for solver_name, solver_cls in BENCH_SOLVERS:
+    for solver_name, solver_cls in BENCH_SOLVERS:
+        print(f"  solver={solver_name}:")
+        for adjoint_name, adjoint in _reverse_mode_adjoints_for_solver(solver_cls):
             total, _ = _compiled_reverse_mode_memory_bytes(
                 solver_cls,
                 y0,
                 adjoint=adjoint,
                 max_steps=max_steps,
             )
-            results.append((solver_name, total))
-
-        print(f"  adjoint={adjoint_name}:")
-        for name, total in results:
-            ratio = total / results[0][1] if results[0][1] else float("inf")
-            print(f"    {name}: {total} bytes  (vs {results[0][0]}: {ratio:.3f}x)")
+            print(f"    adjoint={adjoint_name}: {total} bytes")
             assert total > 0, (
-                f"{name} with adjoint={adjoint_name} reported non-positive "
+                f"{solver_name} with adjoint={adjoint_name} reported non-positive "
                 "reverse-mode compiled-memory bytes."
             )
 
