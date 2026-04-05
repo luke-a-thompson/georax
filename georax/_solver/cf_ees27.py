@@ -13,19 +13,29 @@ from jaxtyping import PyTree
 from georax._solver.commutator_free import AbstractLowStorageCommutatorFreeSolver
 from georax._term import GeometricTerm
 
-_cf_ees25_recurrence = LowStorageRecurrence(
-    A=np.array([-0.5, -2.0]),
-    B=np.array([0.5, 1.0, 0.25]),
-    C=np.array([0.0, 0.5, 1.0]),
+_cf_ees27_recurrence = LowStorageRecurrence(
+    A=np.array([1.0 - np.sqrt(2.0), -1.0, -(1.0 + np.sqrt(2.0))]),
+    B=np.array([
+        0.5 * (2.0 - np.sqrt(2.0)),
+        0.5 * np.sqrt(2.0),
+        0.5 * np.sqrt(2.0),
+        0.25 * (2.0 - np.sqrt(2.0)),
+    ]),
+    C=np.array([
+        0.0,
+        0.5 * (2.0 - np.sqrt(2.0)),
+        0.5 * np.sqrt(2.0),
+        1.0,
+    ]),
 )
 
 _SolverState = Y
 
 
-class CFEES25(AbstractLowStorageCommutatorFreeSolver, AbstractReversibleSolver):
-    """Commutator-free EES(2,5;1/4) solver with chained exponentials."""
+class CFEES27(AbstractLowStorageCommutatorFreeSolver, AbstractReversibleSolver):
+    """Commutator-free EES(2,7;1/4) solver with chained exponentials."""
 
-    recurrence: ClassVar[LowStorageRecurrence] = _cf_ees25_recurrence
+    recurrence: ClassVar[LowStorageRecurrence] = _cf_ees27_recurrence
 
     @override
     def init(
@@ -46,7 +56,7 @@ class CFEES25(AbstractLowStorageCommutatorFreeSolver, AbstractReversibleSolver):
 
     def antisymmetric_order(self, terms):
         del terms
-        return 5
+        return 7
 
     @override
     def step(
