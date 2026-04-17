@@ -3,25 +3,30 @@
 from __future__ import annotations
 
 import argparse
+import os
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 
+os.environ.setdefault("JAX_PLATFORMS", "cpu")
+
 import diffrax
 import jax
+
+jax.config.update("jax_platform_name", "cpu")
+jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import matplotlib
 import matplotlib.markers as mkr
 import matplotlib.pyplot as plt
 import numpy as np
-from diffrax import AbstractReversibleSolver, ReversibleAdjoint
+from diffrax import ReversibleAdjoint
 from diffrax._custom_types import Args, RealScalarLike
 from jaxtyping import Array
 
 from georax import CFEES25, CFEES27, SO, SPD, GeometricTerm
 
 matplotlib.use("Agg")
-jax.config.update("jax_enable_x64", True)
 
 T0 = 0.0
 T1 = 1.0
@@ -115,11 +120,7 @@ def make_matrix_method_runner(
     coeffs_prod_fn: Callable[[RealScalarLike, Array, Args, Array], Array] | None = None,
 ) -> Callable[..., np.ndarray]:
     stepsize_controller = diffrax.ConstantStepSize()
-    adjoint = (
-        ReversibleAdjoint()
-        if isinstance(solver, AbstractReversibleSolver)
-        else diffrax.RecursiveCheckpointAdjoint()
-    )
+    adjoint = ReversibleAdjoint()
 
     @lru_cache(maxsize=None)
     def _compiled_runner(num_points: int):
@@ -266,25 +267,14 @@ def expected_rates(
     solver,
     hurst: float,
 ) -> tuple[float, float]:
-    order_fn = getattr(solver, "order", None)
-    antisymmetric = getattr(solver, "antisymmetric_order", None)
-    order = None
-    antisymmetric_order = None
-    if callable(order_fn):
-        try:
-            order = order_fn(None)
-        except TypeError:
-            order = order_fn()
-    if callable(antisymmetric):
-        try:
-            antisymmetric_order = antisymmetric(None)
-        except TypeError:
-            antisymmetric_order = antisymmetric()
+    _get = lambda name: getattr(solver, name, lambda _: None)(None)
+    order = _get("order")
+    antisymmetric_order = _get("antisymmetric_order")
     if antisymmetric_order is None:
-        assert order is not None
+        if order is None:
+            raise ValueError(f"Solver {solver} does not define an order.")
         antisymmetric_order = order + 1
-    assert antisymmetric_order is not None
-    return 2.0 * hurst - 0.5, float(antisymmetric_order + 1) * hurst - 1.0
+    return 2.0 * hurst - 0.5, (antisymmetric_order + 1.0) * hurst - 1.0
 
 
 def make_paths(num_paths: int, path_power: int, key: jax.Array) -> list[np.ndarray]:
@@ -370,11 +360,11 @@ def plot_grid(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--num-paths", type=int, default=8)
+    parser.add_argument("--num-paths", type=int, default=12)
     parser.add_argument("--path-power", type=int, default=13)
     parser.add_argument("--hurst", type=float, default=0.5)
-    parser.add_argument("--min-power", type=int, default=2)
-    parser.add_argument("--max-power", type=int, default=9)
+    parser.add_argument("--min-power", type=int, default=3)
+    parser.add_argument("--max-power", type=int, default=12)
     parser.add_argument(
         "--output-dir",
         type=Path,

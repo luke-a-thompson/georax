@@ -6,24 +6,16 @@ import diffrax
 import jax
 import jax.numpy as jnp
 import pytest
-from conftest import BENCH_SOLVERS, EuclideanOps
+from conftest import BENCH_CASES, BENCH_SOLVERS, BenchCase
 
-from georax import GeometricTerm
+BENCH_NUM_STEPS = 2048
+BENCH_DT0 = (1.0 - 0.0) / BENCH_NUM_STEPS
 
-def _reverse_mode_adjoints_for_solver(solver_cls):
-    adjoints = [("recursive_checkpoint", diffrax.RecursiveCheckpointAdjoint())]
-    if issubclass(solver_cls, diffrax.AbstractReversibleSolver):
-        adjoints.append(("reversible", diffrax.ReversibleAdjoint()))
-    return adjoints
-
-
-def _to_total_bytes(memory_stats) -> int:
-    return int(
-        memory_stats.temp_size_in_bytes
-        + memory_stats.argument_size_in_bytes
-        + memory_stats.output_size_in_bytes
-        - memory_stats.alias_size_in_bytes
-    )
+REVERSE_MODE_ADJOINTS = [
+    ("recursive_checkpoint", diffrax.RecursiveCheckpointAdjoint()),
+    # ("direct", diffrax.DirectAdjoint()),
+    ("reversible", diffrax.ReversibleAdjoint()),
+]
 
 
 def _get_memory_stats(compiled):
@@ -35,38 +27,32 @@ def _get_memory_stats(compiled):
     return memory_stats
 
 
-def _make_term(vf) -> GeometricTerm:
-    return GeometricTerm(inner=diffrax.ODETerm(vf), geometry=EuclideanOps())
-
-
-def _compiled_memory_bytes(solver_cls, y0):
+def _compiled_memory_bytes(solver_cls, y0, term, args):
     solver = solver_cls()
-    term = _make_term(lambda t, y, args: -10.0 * y**3)
     saveat = diffrax.SaveAt(t1=True)
 
-    def run(y_init):
+    def run(y_init, solve_args):
         out = diffrax.diffeqsolve(
             term,
             solver,
             t0=0.0,
             t1=1.0,
-            dt0=0.01,
+            dt0=BENCH_DT0,
             y0=y_init,
+            args=solve_args,
             saveat=saveat,
             throw=True,
         )
         return out.ys
 
-    compiled = jax.jit(run).lower(y0).compile()
-    memory_stats = _get_memory_stats(compiled)
-    return _to_total_bytes(memory_stats), memory_stats
+    compiled = jax.jit(run).lower(y0, args).compile()
+    return int(_get_memory_stats(compiled).temp_size_in_bytes)
 
 
 def _compiled_reverse_mode_memory_bytes(
-    solver_cls, y0, *, adjoint=None, max_steps=None
+    solver_cls, y0, term, args, grad_target, *, adjoint=None, max_steps=None
 ):
     solver = solver_cls()
-    term = _make_term(lambda t, y, args: -10.0 * y**3)
     saveat = diffrax.SaveAt(t1=True)
     solve_kwargs = {}
     if adjoint is not None:
@@ -74,14 +60,15 @@ def _compiled_reverse_mode_memory_bytes(
     if max_steps is not None:
         solve_kwargs["max_steps"] = max_steps
 
-    def loss(y_init):
+    def loss(y_init, solve_args):
         out = diffrax.diffeqsolve(
             term,
             solver,
             t0=0.0,
             t1=1.0,
-            dt0=0.01,
+            dt0=BENCH_DT0,
             y0=y_init,
+            args=solve_args,
             saveat=saveat,
             throw=True,
             **solve_kwargs,
@@ -89,88 +76,133 @@ def _compiled_reverse_mode_memory_bytes(
         assert out.ys is not None
         return jnp.sum(out.ys)
 
-    compiled = jax.jit(jax.grad(loss)).lower(y0).compile()
-    memory_stats = _get_memory_stats(compiled)
-    return _to_total_bytes(memory_stats), memory_stats
+    if grad_target == "y0":
+        compiled = (
+            jax.jit(jax.value_and_grad(lambda y_init: loss(y_init, args)))
+            .lower(y0)
+            .compile()
+        )
+    elif grad_target == "args":
+        compiled = (
+            jax.jit(jax.value_and_grad(lambda solve_args: loss(y0, solve_args)))
+            .lower(args)
+            .compile()
+        )
+    else:
+        raise ValueError(f"Unsupported grad target: {grad_target}")
+
+    return int(_get_memory_stats(compiled).temp_size_in_bytes)
 
 
-@pytest.mark.parametrize("problem_size", [8192])
-def test_solvers_compiled_memory(problem_size):
-    y0 = jnp.ones((problem_size,), dtype=jnp.float32)
-
-    results = []
-    for solver_name, solver_cls in BENCH_SOLVERS:
-        total, _ = _compiled_memory_bytes(solver_cls, y0)
-        results.append((solver_name, total))
-
-    print(f"\ncompiled-memory-bytes (size={problem_size}):")
-    for name, total in results:
-        ratio = total / results[0][1] if results[0][1] else float("inf")
-        print(f"  {name}: {total} bytes  (vs {results[0][0]}: {ratio:.3f}x)")
-        assert total > 0, f"{name} reported non-positive compiled-memory bytes."
-
-
-@pytest.mark.parametrize("problem_size", [8192])
-def test_solvers_compiled_reverse_mode_memory_by_adjoint(problem_size):
-    y0 = jnp.ones((problem_size,), dtype=jnp.float32)
-    max_steps = 4096
-
-    print(f"\ncompiled-reverse-mode-memory-bytes-by-adjoint (size={problem_size}):")
-    for solver_name, solver_cls in BENCH_SOLVERS:
-        print(f"  solver={solver_name}:")
-        for adjoint_name, adjoint in _reverse_mode_adjoints_for_solver(solver_cls):
-            total, _ = _compiled_reverse_mode_memory_bytes(
-                solver_cls,
-                y0,
-                adjoint=adjoint,
-                max_steps=max_steps,
-            )
-            print(f"    adjoint={adjoint_name}: {total} bytes")
-            assert total > 0, (
-                f"{solver_name} with adjoint={adjoint_name} reported non-positive "
-                "reverse-mode compiled-memory bytes."
-            )
-
-
-def _runtime_seconds(solver_cls, y0, n_repeats=100):
+def _runtime_seconds(solver_cls, y0, term, args, n_repeats=100):
     solver = solver_cls()
-    term = _make_term(lambda t, y, args: -10.0 * y**3)
     saveat = diffrax.SaveAt(t1=True)
 
     @jax.jit
-    def run(y_init):
+    def run(y_init, solve_args):
         out = diffrax.diffeqsolve(
             term,
             solver,
             t0=0.0,
             t1=1.0,
-            dt0=0.01,
+            dt0=BENCH_DT0,
             y0=y_init,
+            args=solve_args,
             saveat=saveat,
             throw=True,
         )
         return out.ys
 
-    # Warmup
-    jax.block_until_ready(run(y0))
+    jax.block_until_ready(run(y0, args))
 
     t0 = time.perf_counter()
     for _ in range(n_repeats):
-        jax.block_until_ready(run(y0))
+        jax.block_until_ready(run(y0, args))
     return (time.perf_counter() - t0) / n_repeats
 
 
-@pytest.mark.parametrize("problem_size", [8192])
-def test_solvers_runtime(problem_size):
-    y0 = jnp.ones((problem_size,), dtype=jnp.float32)
+def _print_table(header, rows, value_fmt):
+    w = max(len(name) for name, _ in rows)
+    print(f"\n{header}")
+    base = rows[0][1]
+    for name, val in rows:
+        ratio = val / base if base else float("inf")
+        print(f"  {name:<{w}}  {value_fmt(val)}  {ratio:.2f}x")
 
+
+@pytest.mark.parametrize("case", BENCH_CASES, ids=[c.name for c in BENCH_CASES])
+def test_solvers_compiled_memory(case: BenchCase):
     results = []
     for solver_name, solver_cls in BENCH_SOLVERS:
-        t = _runtime_seconds(solver_cls, y0)
-        results.append((solver_name, t))
+        total = _compiled_memory_bytes(solver_cls, case.y0, case.term, case.args)
+        results.append((solver_name, total))
 
-    print(f"\nruntime (size={problem_size}):")
-    for name, t in results:
-        ratio = t / results[0][1] if results[0][1] else float("inf")
-        print(f"  {name}: {t * 1e3:.3f} ms  (vs {results[0][0]}: {ratio:.3f}x)")
-        assert t > 0, f"{name} reported non-positive runtime."
+    _print_table(
+        f"compiled-memory [{case.name}]",
+        results,
+        lambda b: f"{b / 1e6:6.2f} MB",
+    )
+    for name, total in results:
+        assert total > 0, f"{name} reported non-positive compiled-memory bytes."
+
+
+@pytest.mark.parametrize("case", BENCH_CASES, ids=[c.name for c in BENCH_CASES])
+@pytest.mark.parametrize(
+    "adjoint_name,adjoint",
+    REVERSE_MODE_ADJOINTS,
+    ids=[name for name, _ in REVERSE_MODE_ADJOINTS],
+)
+def test_solvers_compiled_reverse_mode_memory_by_adjoint(
+    case: BenchCase, adjoint_name, adjoint
+):
+    max_steps = BENCH_NUM_STEPS * 2
+
+    solvers = BENCH_SOLVERS
+    if isinstance(adjoint, diffrax.ReversibleAdjoint):
+        solvers = [
+            (name, cls)
+            for name, cls in BENCH_SOLVERS
+            if issubclass(cls, diffrax.AbstractReversibleSolver)
+        ]
+        if not solvers:
+            pytest.skip("No AbstractReversibleSolver in BENCH_SOLVERS.")
+
+    results = []
+    for solver_name, solver_cls in solvers:
+        total = _compiled_reverse_mode_memory_bytes(
+            solver_cls,
+            case.y0,
+            case.term,
+            case.args,
+            case.grad_target,
+            adjoint=adjoint,
+            max_steps=max_steps,
+        )
+        results.append((solver_name, total))
+
+    _print_table(
+        f"grad-memory [{adjoint_name}/{case.name}]",
+        results,
+        lambda b: f"{b / 1e6:6.2f} MB",
+    )
+    for name, total in results:
+        assert total > 0, (
+            f"{name} with adjoint={adjoint_name} reported non-positive "
+            "reverse-mode compiled-memory bytes."
+        )
+
+
+# @pytest.mark.parametrize("case", BENCH_CASES, ids=[c.name for c in BENCH_CASES])
+# def test_solvers_runtime(case: BenchCase):
+#     results = []
+#     for solver_name, solver_cls in BENCH_SOLVERS:
+#         t = _runtime_seconds(solver_cls, case.y0, case.term, case.args)
+#         results.append((solver_name, t))
+
+#     _print_table(
+#         f"runtime [{case.name}]",
+#         results,
+#         lambda t: f"{t * 1e3:7.2f} ms",
+#     )
+#     for name, t in results:
+#         assert t > 0, f"{name} reported non-positive runtime."
