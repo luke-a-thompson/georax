@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import pytest
-from conftest import EuclideanOps
 from diffrax import ODETerm
 
-from georax import SO, GeometricTerm
+from georax import SO, Euclidean, GeometricTerm
 
 
 def _zero_vf(t, y, args):
@@ -47,7 +46,7 @@ def test_chart_differential_inv_is_identity_at_zero() -> None:
 def test_manifold_raises_on_lie_group_helpers() -> None:
     # EuclideanOps is a Manifold but not a LieGroup subclass; chart_differential_inv
     # requires LieGroup and should raise.
-    term = GeometricTerm(inner=ODETerm(_zero_vf), geometry=EuclideanOps())
+    term = GeometricTerm(inner=ODETerm(_zero_vf), geometry=Euclidean())
     a = jnp.array([0.1, -0.2])
 
     with pytest.raises(TypeError):

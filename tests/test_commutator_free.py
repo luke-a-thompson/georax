@@ -6,7 +6,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from conftest import EuclideanOps
 from diffrax import (
     CheckpointedReversibleAdjoint,
     ControlTerm,
@@ -20,12 +19,13 @@ from diffrax_lowstorage import LowStorageRecurrence
 from jaxtyping import Array
 
 from georax import (
-    AbstractCommutatorFreeSolver,
-    AbstractLowStorageCommutatorFreeSolver,
     CFEES25,
     CG2,
-    LocalFlow,
     SPD,
+    AbstractCommutatorFreeSolver,
+    AbstractLowStorageCommutatorFreeSolver,
+    Euclidean,
+    LocalFlow,
 )
 from georax._geometry import Manifold
 from georax._solver.commutator_free import CommutatorFreeTableau
@@ -202,7 +202,7 @@ def test_embedded_pair_returns_error_estimate() -> None:
 
     y1, y_error, dense_info, _, _ = _run_step(
         EmbeddedSolver(),
-        _make_term(vf, EuclideanOps()),
+        _make_term(vf, Euclidean()),
     )
 
     assert bool(jnp.allclose(y1, jnp.array([4.0])))
@@ -228,7 +228,7 @@ def test_low_storage_recurrence_applies_chained_flows() -> None:
 
     y1, y_error, _, _, _ = _run_step(
         TwoStageLowStorageSolver(),
-        _make_term(vf, EuclideanOps()),
+        _make_term(vf, Euclidean()),
     )
 
     assert y_error is None
@@ -241,7 +241,7 @@ def test_control_term_uses_vf_prod_for_stage_coefficients() -> None:
         lambda t, y, args: jnp.array([[3.0, -1.0]]),
         lambda t0, t1: jnp.array([2.0, -1.0]),
     )
-    term = GeometricTerm(inner=inner, geometry=EuclideanOps())
+    term = GeometricTerm(inner=inner, geometry=Euclidean())
 
     y1, _, _, _, _ = _run_step(solver, term)
 
@@ -257,7 +257,7 @@ def test_multiterm_combines_drift_and_control_increments() -> None:
             lambda t0, t1: jnp.array([2.0, -1.0]),
         ),
     )
-    term = GeometricTerm(inner=inner, geometry=EuclideanOps())
+    term = GeometricTerm(inner=inner, geometry=Euclidean())
 
     y1, _, _, _, _ = _run_step(solver, term)
 
@@ -270,7 +270,7 @@ def test_diffeqsolve_accepts_control_terms() -> None:
             lambda t, y, args: jnp.array([[3.0, -1.0]]),
             lambda t0, t1: jnp.array([2.0, -1.0]),
         ),
-        geometry=EuclideanOps(),
+        geometry=Euclidean(),
     )
     solution = diffeqsolve(
         term,
@@ -325,7 +325,7 @@ def test_cfees25_supports_checkpointed_reversible_adjoint() -> None:
     )
     term = GeometricTerm(
         inner=ControlTerm(lambda t, y, args: jnp.ones((1, 1)), path),
-        geometry=EuclideanOps(),
+        geometry=Euclidean(),
     )
 
     solution = diffeqsolve(

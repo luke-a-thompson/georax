@@ -24,6 +24,7 @@ T0 = 0.0
 T1 = 1.0
 MAX_STEPS = 100_000
 
+
 def omega_body(t: RealScalarLike) -> Array:
     t_array = jnp.asarray(t)
     return jnp.array(

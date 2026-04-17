@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import pytest
-from conftest import EuclideanOps
 from diffrax import Heun, ODETerm
 
-from georax import CG2, RKMK, GeometricTerm
+from georax import CG2, RKMK, Euclidean, GeometricTerm
 
 
 def test_rkmk_rejects_non_erk_base_solver() -> None:
@@ -15,7 +14,7 @@ def test_rkmk_rejects_non_erk_base_solver() -> None:
 
 def test_rkmk_requires_lie_group_geometry() -> None:
     solver = RKMK(Heun())
-    term = GeometricTerm(inner=ODETerm(lambda t, y, args: y), geometry=EuclideanOps())
+    term = GeometricTerm(inner=ODETerm(lambda t, y, args: y), geometry=Euclidean())
 
     with pytest.raises(TypeError):
         solver.step(
