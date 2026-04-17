@@ -3,10 +3,8 @@ from __future__ import annotations
 from typing import ClassVar, override
 
 import numpy as np
-from diffrax import AbstractReversibleSolver
+from diffrax import RESULTS, AbstractReversibleSolver, AbstractTerm
 from diffrax._custom_types import Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
-from diffrax._solution import RESULTS
-from diffrax._term import AbstractTerm
 from diffrax_lowstorage import LowStorageRecurrence
 from jaxtyping import PyTree
 

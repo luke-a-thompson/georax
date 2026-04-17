@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import override
 
 import equinox as eqx
-from diffrax._custom_types import RealScalarLike
 import jax.numpy as jnp
 import jax.scipy.linalg as jsp_linalg
 import numpy as np
+from diffrax._custom_types import RealScalarLike
 from jaxtyping import Array
 
 from .base import LieGroup, LocalFlow, flow_order
