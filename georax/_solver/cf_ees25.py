@@ -12,9 +12,9 @@ from georax._solver.commutator_free import AbstractLowStorageCommutatorFreeSolve
 from georax._term import GeometricTerm
 
 _cf_ees25_recurrence = LowStorageRecurrence(
-    A=np.array([-0.5, -2.0]),
-    B=np.array([0.5, 1.0, 0.25]),
-    C=np.array([0.0, 0.5, 1.0]),
+    A=np.array([-7 / 15, -35 / 32]),
+    B=np.array([1 / 3, 15 / 16, 2 / 5]),
+    C=np.array([0.0, 1 / 3, 5 / 6]),
 )
 
 _SolverState = Y

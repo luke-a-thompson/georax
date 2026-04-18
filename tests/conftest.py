@@ -35,33 +35,73 @@ class BenchCase(NamedTuple):
     grad_target: Literal["y0", "args"]
 
 
-# ── SO(3) accuracy term (used by test_solver_accuracy.py) ─────────────────────
+# ── SO(3) accuracy terms (used by tests and docs examples) ────────────────────
+
+_SO3_GEOMETRY = SO(3)
+_SO3_NOISE_SCALE = jnp.array([0.12, 0.08, 0.05], dtype=jnp.float32)
+
+
+def so3_body_omega(t: RealScalarLike) -> Array:
+    t_array = jnp.asarray(t)
+    return jnp.array(
+        [
+            0.8 + 0.45 * jnp.sin(0.7 * t_array),
+            0.55 * jnp.cos(1.3 * t_array + 0.2),
+            0.35 + 0.6 * jnp.sin(0.9 * t_array - 0.4),
+        ]
+    )
+
+
+def so3_body_frame_coeffs(t: RealScalarLike) -> Array:
+    omega = so3_body_omega(t)
+    return jnp.array([-omega[2], omega[1], -omega[0]], dtype=omega.dtype)
 
 
 def make_solver_accuracy_term() -> GeometricTerm:
-    def omega_body(t: RealScalarLike) -> Array:
-        t_array = jnp.asarray(t)
-        return jnp.array(
-            [
-                0.8 + 0.45 * jnp.sin(0.7 * t_array),
-                0.55 * jnp.cos(1.3 * t_array + 0.2),
-                0.35 + 0.6 * jnp.sin(0.9 * t_array - 0.4),
-            ]
-        )
+    def vf(t: RealScalarLike, R: Array, args: Args) -> Array:
+        del args
+        return _SO3_GEOMETRY.from_frame(R, so3_body_frame_coeffs(t))
+
+    return GeometricTerm(inner=diffrax.ODETerm(vf), geometry=_SO3_GEOMETRY)
+
+
+def make_solver_accuracy_sde_term(
+    *,
+    bm_tol: float = 1e-3,
+    key: Array | None = None,
+) -> GeometricTerm:
+    if key is None:
+        key = jax.random.key(0)
+
+    brownian = diffrax.VirtualBrownianTree(
+        t0=0.0,
+        t1=1.0,
+        tol=bm_tol,
+        shape=(_SO3_GEOMETRY.lie_algebra_dimension,),
+        key=key,
+    )
 
     def vf(t: RealScalarLike, R: Array, args: Args) -> Array:
         del args
-        omega = omega_body(t)
-        skew = jnp.array(
-            [
-                [0.0, -omega[2], omega[1]],
-                [omega[2], 0.0, -omega[0]],
-                [-omega[1], omega[0], 0.0],
-            ]
-        )
-        return R @ skew
+        return _SO3_GEOMETRY.from_frame(R, so3_body_frame_coeffs(t))
 
-    return GeometricTerm(inner=diffrax.ODETerm(vf), geometry=SO(3))
+    def diffusion_op(t: RealScalarLike, R: Array, args: Args):
+        del t, R, args
+        return lineax.DiagonalLinearOperator(_SO3_NOISE_SCALE)
+
+    def coeffs_prod(t: RealScalarLike, R: Array, args: Args, control) -> Array:
+        del R, args
+        dt, dW = control
+        return so3_body_frame_coeffs(t) * dt + _SO3_NOISE_SCALE * dW
+
+    return GeometricTerm(
+        inner=MultiTerm(
+            ODETerm(vf),
+            diffrax.ControlTerm(diffusion_op, brownian),
+        ),
+        geometry=_SO3_GEOMETRY,
+        coeffs_prod_fn=coeffs_prod,
+    )
 
 
 # ── Euclidean MLP ──────────────────────────────────────────────────────────────
@@ -136,100 +176,107 @@ _BENCH_EUCLIDEAN_SDE_TERM_ARGS = GeometricTerm(
     geometry=Euclidean(),
 )
 
-# ── SO(3) MLP VF ──────────────────────────────────────────────────────────────
+# ── SO(N) MLP VF ──────────────────────────────────────────────────────────────
 
-# A small MLP mapping the flattened rotation matrix R^9 to frame coordinates
-# R^3. The ambient tangent is reconstructed via R @ skew(a) to stay in T_R SO(3).
-# Using a matrix VF (rather than coeffs_fn) exercises the full geometry pipeline
-# including to_frame projection.
-_SO3_HIDDEN = 64
-_so3_keys = jax.random.split(jax.random.key(7), 3)
-_SO3_W_IN = jax.random.normal(_so3_keys[0], (_SO3_HIDDEN, 9)) / jnp.sqrt(9.0)
-_SO3_W_MID = jax.random.normal(_so3_keys[1], (_SO3_HIDDEN, _SO3_HIDDEN)) / jnp.sqrt(
-    float(_SO3_HIDDEN)
+# Use a high-dimensional SO(N) benchmark so the manifold state and Lie algebra
+# coordinates are large enough to expose solver-owned stage storage costs.
+_SON_N = 46
+_SON_DIM = _SON_N * (_SON_N - 1) // 2  # 1035, close to the Euclidean 1028 state
+_SON_HIDDEN = 768
+_SON_AMBIENT_DIM = _SON_N * _SON_N
+_SON_NUM_LAYERS = 3
+_son_keys = jax.random.split(jax.random.key(7), _SON_NUM_LAYERS)
+_SON_W_IN = jax.random.normal(_son_keys[0], (_SON_HIDDEN, _SON_AMBIENT_DIM)) / jnp.sqrt(
+    float(_SON_AMBIENT_DIM)
 )
-_SO3_W_OUT = jax.random.normal(_so3_keys[2], (3, _SO3_HIDDEN)) / jnp.sqrt(
-    float(_SO3_HIDDEN)
+_SON_W_MID = tuple(
+    jax.random.normal(key, (_SON_HIDDEN, _SON_HIDDEN)) / jnp.sqrt(float(_SON_HIDDEN))
+    for key in _son_keys[1:-1]
 )
-_SO3_PARAMS = (_SO3_W_IN, _SO3_W_MID, _SO3_W_OUT)
+_SON_W_OUT = jax.random.normal(_son_keys[-1], (_SON_DIM, _SON_HIDDEN)) / jnp.sqrt(
+    float(_SON_HIDDEN)
+)
+_SON_PARAMS = (_SON_W_IN, _SON_W_MID, _SON_W_OUT)
 
-# Precompute SO(3) skew basis so VFs don't depend on a specific geometry instance.
-_SO3_BASIS = SO(3)._basis  # (3, 3, 3): basis[:, :, k] is the k-th skew basis matrix
+# Precompute SO(N) skew basis so VFs don't depend on a specific geometry instance.
+_SON_GEOMETRY = SO(_SON_N)
+_SON_BASIS = _SON_GEOMETRY._basis
 
 
-def _so3_apply(weights, R):
-    w_in, w_mid, w_out = weights
+def _son_apply(weights, R):
+    w_in, w_mid_layers, w_out = weights
     h = jnp.tanh(w_in @ R.flatten())
-    h = jnp.tanh(w_mid @ h)
-    return -0.1 * (w_out @ h)  # (3,) frame coords
+    for w_mid in w_mid_layers:
+        h = jnp.tanh(w_mid @ h)
+    return -0.1 * (w_out @ h)  # (dim so(n),) frame coords
 
 
-def _so3_ambient_from_frame(R, a):
-    """Lift frame coords (3,) to ambient tangent (3, 3) = R @ skew(a)."""
-    omega = jnp.einsum("ijk,k->ij", _SO3_BASIS, a)
+def _son_ambient_from_frame(R, a):
+    """Lift frame coords to ambient tangent R @ skew(a)."""
+    omega = jnp.einsum("ijk,k->ij", _SON_BASIS, a)
     return R @ omega
 
 
-def _so3_vf_global(t, R, args):
+def _son_vf_global(t, R, args):
     del t, args
-    return _so3_ambient_from_frame(R, _so3_apply(_SO3_PARAMS, R))
+    return _son_ambient_from_frame(R, _son_apply(_SON_PARAMS, R))
 
 
-def _so3_vf_args(t, R, args):
+def _son_vf_args(t, R, args):
     del t
-    return _so3_ambient_from_frame(R, _so3_apply(args, R))
+    return _son_ambient_from_frame(R, _son_apply(args, R))
 
 
-# For the SDE, noise lives in the Lie algebra: dW ∈ R^3 maps to frame coords
+# For the SDE, noise lives in the Lie algebra: dW ∈ R^dim maps to frame coords
 # via constant scaling. We use coeffs_prod_fn to express this directly in frame
-# coordinates, bypassing the need for a (3,) → (3, 3) linear operator.
-_SO3_NOISE_SCALE = jnp.full((3,), 0.05)
-_bench_bm_so3 = diffrax.VirtualBrownianTree(
-    t0=0.0, t1=1.0, tol=1e-3, shape=(3,), key=jax.random.key(1)
+# coordinates, bypassing the need for a dim -> (N, N) linear operator.
+_SON_NOISE_SCALE = jnp.full((_SON_DIM,), 0.05)
+_bench_bm_son = diffrax.VirtualBrownianTree(
+    t0=0.0, t1=1.0, tol=1e-3, shape=(_SON_DIM,), key=jax.random.key(1)
 )
 
 
-def _so3_sde_coeffs_prod_global(t, R, args, control):
+def _son_sde_coeffs_prod_global(t, R, args, control):
     dt, dW = control
-    return _so3_apply(_SO3_PARAMS, R) * dt + _SO3_NOISE_SCALE * dW
+    return _son_apply(_SON_PARAMS, R) * dt + _SON_NOISE_SCALE * dW
 
 
-def _so3_sde_coeffs_prod_args(t, R, args, control):
+def _son_sde_coeffs_prod_args(t, R, args, control):
     dt, dW = control
-    return _so3_apply(args, R) * dt + _SO3_NOISE_SCALE * dW
+    return _son_apply(args, R) * dt + _SON_NOISE_SCALE * dW
 
 
-_BENCH_SO3_ODE_TERM_GLOBAL = GeometricTerm(
-    inner=ODETerm(_so3_vf_global),
-    geometry=SO(3),
+_BENCH_SON_ODE_TERM_GLOBAL = GeometricTerm(
+    inner=ODETerm(_son_vf_global),
+    geometry=_SON_GEOMETRY,
 )
-_BENCH_SO3_ODE_TERM_ARGS = GeometricTerm(
-    inner=ODETerm(_so3_vf_args),
-    geometry=SO(3),
+_BENCH_SON_ODE_TERM_ARGS = GeometricTerm(
+    inner=ODETerm(_son_vf_args),
+    geometry=_SON_GEOMETRY,
 )
 # The inner MultiTerm provides contr = (dt, dW); coeffs_prod_fn computes frame
 # coefficients directly, so the ControlTerm VF is never evaluated.
-_BENCH_SO3_SDE_TERM_GLOBAL = GeometricTerm(
+_BENCH_SON_SDE_TERM_GLOBAL = GeometricTerm(
     inner=MultiTerm(
-        ODETerm(_so3_vf_global),
+        ODETerm(_son_vf_global),
         diffrax.ControlTerm(
-            lambda t, R, args: lineax.DiagonalLinearOperator(_SO3_NOISE_SCALE),
-            _bench_bm_so3,
+            lambda t, R, args: lineax.DiagonalLinearOperator(_SON_NOISE_SCALE),
+            _bench_bm_son,
         ),
     ),
-    geometry=SO(3),
-    coeffs_prod_fn=_so3_sde_coeffs_prod_global,
+    geometry=_SON_GEOMETRY,
+    coeffs_prod_fn=_son_sde_coeffs_prod_global,
 )
-_BENCH_SO3_SDE_TERM_ARGS = GeometricTerm(
+_BENCH_SON_SDE_TERM_ARGS = GeometricTerm(
     inner=MultiTerm(
-        ODETerm(_so3_vf_args),
+        ODETerm(_son_vf_args),
         diffrax.ControlTerm(
-            lambda t, R, args: lineax.DiagonalLinearOperator(_SO3_NOISE_SCALE),
-            _bench_bm_so3,
+            lambda t, R, args: lineax.DiagonalLinearOperator(_SON_NOISE_SCALE),
+            _bench_bm_son,
         ),
     ),
-    geometry=SO(3),
-    coeffs_prod_fn=_so3_sde_coeffs_prod_args,
+    geometry=_SON_GEOMETRY,
+    coeffs_prod_fn=_son_sde_coeffs_prod_args,
 )
 
 # ── Benchmark Cases ────────────────────────────────────────────────────────────
@@ -267,31 +314,31 @@ BENCH_CASES = [
         "args",
     ),
     BenchCase(
-        "ode/so3/global",
-        _BENCH_SO3_ODE_TERM_GLOBAL,
-        jnp.eye(3, dtype=jnp.float32),
+        f"ode/so{_SON_N}/global",
+        _BENCH_SON_ODE_TERM_GLOBAL,
+        jnp.eye(_SON_N, dtype=jnp.float32),
         None,
         "y0",
     ),
     BenchCase(
-        "ode/so3/args",
-        _BENCH_SO3_ODE_TERM_ARGS,
-        jnp.eye(3, dtype=jnp.float32),
-        _SO3_PARAMS,
+        f"ode/so{_SON_N}/args",
+        _BENCH_SON_ODE_TERM_ARGS,
+        jnp.eye(_SON_N, dtype=jnp.float32),
+        _SON_PARAMS,
         "args",
     ),
     BenchCase(
-        "sde/so3/global",
-        _BENCH_SO3_SDE_TERM_GLOBAL,
-        jnp.eye(3, dtype=jnp.float32),
+        f"sde/so{_SON_N}/global",
+        _BENCH_SON_SDE_TERM_GLOBAL,
+        jnp.eye(_SON_N, dtype=jnp.float32),
         None,
         "y0",
     ),
     BenchCase(
-        "sde/so3/args",
-        _BENCH_SO3_SDE_TERM_ARGS,
-        jnp.eye(3, dtype=jnp.float32),
-        _SO3_PARAMS,
+        f"sde/so{_SON_N}/args",
+        _BENCH_SON_SDE_TERM_ARGS,
+        jnp.eye(_SON_N, dtype=jnp.float32),
+        _SON_PARAMS,
         "args",
     ),
 ]

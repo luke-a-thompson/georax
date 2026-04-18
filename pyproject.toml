@@ -25,7 +25,8 @@ roughrax = [
 ]
 dev = [
     "pytest",
-    "matplotlib>=3.10.8",
+    "matplotlib",
+    "fbm",
 ]
 
 [tool.uv.build-backend]

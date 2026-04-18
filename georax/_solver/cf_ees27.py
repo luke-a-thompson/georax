@@ -11,24 +11,12 @@ from jaxtyping import PyTree
 from georax._solver.commutator_free import AbstractLowStorageCommutatorFreeSolver
 from georax._term import GeometricTerm
 
+_s2 = np.sqrt(2.0)
+
 _cf_ees27_recurrence = LowStorageRecurrence(
-    A=np.array([1.0 - np.sqrt(2.0), -1.0, -(1.0 + np.sqrt(2.0))]),
-    B=np.array(
-        [
-            0.5 * (2.0 - np.sqrt(2.0)),
-            0.5 * np.sqrt(2.0),
-            0.5 * np.sqrt(2.0),
-            0.25 * (2.0 - np.sqrt(2.0)),
-        ]
-    ),
-    C=np.array(
-        [
-            0.0,
-            0.5 * (2.0 - np.sqrt(2.0)),
-            0.5 * np.sqrt(2.0),
-            1.0,
-        ]
-    ),
+    A=np.array([(-7 + 4 * _s2) / 3, -(4 + 5 * _s2) / 12, 3 * (-31 + 8 * _s2) / 49]),
+    B=np.array([(2 - _s2) / 3, (4 + _s2) / 8, 3 * (3 - _s2) / 7, (9 - 4 * _s2) / 14]),
+    C=np.array([0.0, (2 - _s2) / 3, (2 + _s2) / 6, (4 + _s2) / 6]),
 )
 
 _SolverState = Y

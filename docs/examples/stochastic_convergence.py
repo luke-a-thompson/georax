@@ -22,64 +22,22 @@ import matplotlib.pyplot as plt
 import numpy as np
 from diffrax import ReversibleAdjoint
 from diffrax._custom_types import Args, RealScalarLike
+from fbm import FBM
 from jaxtyping import Array
 
-from georax import CFEES25, CFEES27, SO, SPD, GeometricTerm
+from georax import CFEES25, CFEES27, SO, GeometricTerm
 
 matplotlib.use("Agg")
 
 T0 = 0.0
 T1 = 1.0
-SIGMA = 0.2
-GEOMETRY = SPD(2)
-X0 = jnp.array([[1.4, 0.2], [0.2, 0.9]], dtype=jnp.float64)
+SIGMA = 1.0
 SO3_X0 = jnp.eye(3, dtype=jnp.float64)
 SO3_GEOMETRY = SO(3)
 
-
-def sym(matrix: Array) -> Array:
-    return 0.5 * (matrix + matrix.T)
-
-
-def spd_sym_lift_matrices(x: Array) -> tuple[Array, Array]:
-    x = sym(jnp.asarray(x))
-    s1 = jnp.array(
-        [
-            [0.55 + 0.18 * x[0, 0], 0.20 + 0.12 * x[0, 1]],
-            [0.20 + 0.12 * x[0, 1], -0.25 + 0.10 * x[1, 1]],
-        ],
-        dtype=x.dtype,
-    )
-    s2 = jnp.array(
-        [
-            [0.15 + 0.22 * x[0, 1], -0.30 + 0.14 * x[0, 0]],
-            [-0.30 + 0.14 * x[0, 0], 0.65 + 0.16 * x[1, 1]],
-        ],
-        dtype=x.dtype,
-    )
-    return SIGMA * sym(s1), SIGMA * sym(s2)
-
-
-def spd_tangent_columns(x: Array) -> Array:
-    s1, s2 = spd_sym_lift_matrices(x)
-    x = sym(jnp.asarray(x))
-    col1 = sym(s1 @ x + x @ s1)
-    col2 = sym(s2 @ x + x @ s2)
-    return jnp.stack((col1, col2), axis=-1)
-
-
-def spd_coeffs_prod(t: RealScalarLike, x: Array, args: Args, control: Array) -> Array:
-    del t, args
-    tangent_columns = spd_tangent_columns(x)
-    tangent = (
-        control[0] * tangent_columns[..., 0] + control[1] * tangent_columns[..., 1]
-    )
-    return GEOMETRY.to_frame(x, tangent)
-
-
-def vector_field(t, x, args):
-    del t, args
-    return spd_tangent_columns(x)
+XLABEL = r"$\log_{10}(h)$"
+YLABEL_FORWARD = r"$\log_{10}(\mathcal{E}(h))$"
+YLABEL_BACKWARD = r"$\log_{10}(\overleftarrow{\mathcal{E}}(h))$"
 
 
 def so3_vector_field(t: RealScalarLike, x: Array, args: Args) -> Array:
@@ -109,6 +67,11 @@ def get_2d_bm(num_steps: int, length: float, key: jax.Array) -> np.ndarray:
     x = np.zeros((num_steps + 1, 2), dtype=np.float64)
     x[1:] = np.cumsum(dw, axis=0)
     return x
+
+
+def get_2d_fbm(num_steps: int, hurst: float, length: float) -> np.ndarray:
+    fbm = FBM(n=num_steps, hurst=hurst, length=length, method="daviesharte")
+    return np.stack([fbm.fbm(), fbm.fbm()], axis=-1)
 
 
 def make_matrix_method_runner(
@@ -168,16 +131,6 @@ def make_matrix_method_runner(
         return np.asarray(y, dtype=np.float64)
 
     return _run
-
-
-def make_method_runner(solver) -> Callable[..., np.ndarray]:
-    return make_matrix_method_runner(
-        solver,
-        geometry=GEOMETRY,
-        vector_field_fn=vector_field,
-        y0_default=np.asarray(X0, dtype=np.float64),
-        coeffs_prod_fn=spd_coeffs_prod,
-    )
 
 
 def make_so3_method_runner(solver) -> Callable[..., np.ndarray]:
@@ -243,11 +196,7 @@ def plot_curve(
     dx = np.array([x[0], x[-1]], dtype=np.float64)
     intercept = float(np.mean(y) - slope * np.mean(x))
     fit = np.polyfit(x, y, 1)
-    err_label = (
-        r"$\log_{10}(\mathcal{E}(h))$"
-        if not backward
-        else r"$\log_{10}(\overleftarrow{\mathcal{E}}(h))$"
-    )
+    err_label = YLABEL_BACKWARD if backward else YLABEL_FORWARD
     mode = "backward" if backward else "forward"
     print(f"{name} {mode} slope: {fit[0]:.6f}")
 
@@ -259,7 +208,7 @@ def plot_curve(
     )
     ax.plot(dx, slope * dx + intercept, color="mediumblue")
     ax.legend([err_label, f"{np.round(slope, 1)}$x + c$"])
-    ax.set_xlabel(r"$\log_{10}(h)$")
+    ax.set_xlabel(XLABEL)
     ax.set_ylabel(err_label)
 
 
@@ -277,10 +226,14 @@ def expected_rates(
     return 2.0 * hurst - 0.5, (antisymmetric_order + 1.0) * hurst - 1.0
 
 
-def make_paths(num_paths: int, path_power: int, key: jax.Array) -> list[np.ndarray]:
+def make_paths(
+    num_paths: int, path_power: int, key: jax.Array, hurst: float = 0.5
+) -> list[np.ndarray]:
     num_steps = 2**path_power
-    keys = jax.random.split(key, num_paths)
-    return [get_2d_bm(num_steps, T1 - T0, subkey) for subkey in keys]
+    if hurst == 0.5:
+        keys = jax.random.split(key, num_paths)
+        return [get_2d_bm(num_steps, T1 - T0, subkey) for subkey in keys]
+    return [get_2d_fbm(num_steps, hurst, T1 - T0) for _ in range(num_paths)]
 
 
 def plot_grid(
@@ -291,41 +244,36 @@ def plot_grid(
 ) -> Path:
     benchmarks = [
         (
-            "SPD(2) manifold CF-EES(2,5;1/4)",
-            CFEES25(),
-            make_method_runner,
-            get_error,
-            matrix_distance,
-        ),
-        (
-            "SPD(2) manifold CF-EES(2,7;1/4)",
-            CFEES27(),
-            make_method_runner,
-            get_error,
-            matrix_distance,
-        ),
-        (
-            "SO(3) manifold CF-EES(2,5;1/4)",
+            "CF-EES25",
             CFEES25(),
             make_so3_method_runner,
             get_error,
             matrix_distance,
+            r"$\mathcal{E}(h)$ for $\mathrm{CF\text{-}EES}_\mathcal{R}(2,5)$",
+            r"$\overleftarrow{\mathcal{E}}(h)$ for $\mathrm{CF\text{-}EES}_\mathcal{R}(2,5)$",
         ),
         (
-            "SO(3) manifold CF-EES(2,7;1/4)",
+            "CF-EES27",
             CFEES27(),
             make_so3_method_runner,
             get_error,
             matrix_distance,
+            r"$\mathcal{E}(h)$ for $\mathrm{CF\text{-}EES}_\mathcal{R}(2,7)$",
+            r"$\overleftarrow{\mathcal{E}}(h)$ for $\mathrm{CF\text{-}EES}_\mathcal{R}(2,7)$",
         ),
     ]
 
     fig, axes = plt.subplots(len(benchmarks), 2, figsize=(10, 3.2 * len(benchmarks)))
-    titles = ["Forward", "Backward"]
 
-    for i, (name, solver, runner_factory, error_fn, distance_fn) in enumerate(
-        benchmarks
-    ):
+    for i, (
+        name,
+        solver,
+        runner_factory,
+        error_fn,
+        distance_fn,
+        fwd_title,
+        bwd_title,
+    ) in enumerate(benchmarks):
         runner = runner_factory(solver)
         forward_y, backward_y = compute_error_curves(
             runner,
@@ -337,22 +285,15 @@ def plot_grid(
         forward_rate, backward_rate = expected_rates(solver, hurst)
 
         plot_curve(name, hs, forward_y, forward_rate, axes[i][0], backward=False)
-        axes[i][0].set_title(f"{name} {titles[0]}")
+        axes[i][0].set_title(fwd_title)
 
-        plot_curve(
-            name,
-            hs,
-            backward_y,
-            backward_rate,
-            axes[i][1],
-            backward=True,
-        )
-        axes[i][1].set_title(f"{name} {titles[1]}")
+        plot_curve(name, hs, backward_y, backward_rate, axes[i][1], backward=True)
+        axes[i][1].set_title(bwd_title)
 
     plt.tight_layout()
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "stochastic_convergence.png"
-    plt.savefig(output_path, dpi=200)
+    output_path = output_dir / f"stochastic_convergence_H{int(hurst * 100)}.pdf"
+    plt.savefig(output_path)
     plt.close()
     return output_path
 
@@ -362,9 +303,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-paths", type=int, default=12)
     parser.add_argument("--path-power", type=int, default=13)
-    parser.add_argument("--hurst", type=float, default=0.5)
+    parser.add_argument("--hurst", type=float, nargs="+", default=[0.4, 0.5, 0.6])
     parser.add_argument("--min-power", type=int, default=3)
-    parser.add_argument("--max-power", type=int, default=12)
+    parser.add_argument("--max-power", type=int, default=11)
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -379,9 +320,12 @@ def main() -> None:
         [2.0 ** (-k) for k in range(args.min_power, args.max_power + 1)],
         dtype=np.float64,
     )
-    paths = make_paths(args.num_paths, args.path_power, jax.random.key(args.seed))
-    output_path = plot_grid(paths, hs, args.hurst, args.output_dir)
-    print(f"Saved {output_path}")
+    key = jax.random.key(args.seed)
+    for hurst in args.hurst:
+        np.random.seed(args.seed)
+        paths = make_paths(args.num_paths, args.path_power, key, hurst=hurst)
+        output_path = plot_grid(paths, hs, hurst, args.output_dir)
+        print(f"H={hurst:.1f} saved {output_path}")
 
 
 if __name__ == "__main__":
