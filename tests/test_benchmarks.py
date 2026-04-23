@@ -130,6 +130,7 @@ def _print_table(header, rows, value_fmt):
         print(f"  {name:<{w}}  {value_fmt(val)}  {ratio:.2f}x")
 
 
+@pytest.mark.benchmark
 @pytest.mark.parametrize("case", BENCH_CASES, ids=[c.name for c in BENCH_CASES])
 def test_solvers_compiled_memory(case: BenchCase):
     results = []
@@ -146,6 +147,7 @@ def test_solvers_compiled_memory(case: BenchCase):
         assert total > 0, f"{name} reported non-positive compiled-memory bytes."
 
 
+@pytest.mark.benchmark
 @pytest.mark.parametrize("case", BENCH_CASES, ids=[c.name for c in BENCH_CASES])
 @pytest.mark.parametrize(
     "adjoint_name,adjoint",

@@ -47,6 +47,18 @@ def test_spd_retraction_matches_first_order_tangent_step() -> None:
     assert bool(jnp.allclose(y, x + eps * v, atol=1e-7, rtol=1e-4))
 
 
+def test_spd_chart_inverse_differential_is_identity_at_zero() -> None:
+    spd = SPD(2)
+    x = jnp.array([[1.8, 0.2], [0.2, 1.3]])
+    a = jnp.zeros(spd.dimension)
+    b = jnp.array([0.4, -0.15, 0.25])
+    assert spd.chart is not None
+
+    corrected = spd.chart.inverse_differential(x, a, b, spd)
+
+    assert bool(jnp.allclose(corrected, b, atol=1e-6))
+
+
 def test_spd_commutator_free_step_preserves_spd() -> None:
     geometry = SPD(2)
     solver = CG2()

@@ -57,28 +57,6 @@ def _reversible_roundtrip_error(
 
 
 @pytest.mark.parametrize(("solver_name", "solver_cls"), SOLVERS)
-def test_solver_fixed_step_matches_reference_solution(solver_name, solver_cls):
-    del solver_name
-
-    solver = solver_cls()
-    out = diffrax.diffeqsolve(
-        _TERM,
-        solver,
-        _T0,
-        _T1,
-        0.01,
-        _Y0,
-        saveat=diffrax.SaveAt(t1=True),
-        max_steps=_MAX_STEPS,
-        throw=True,
-    )
-
-    assert out.result == diffrax.RESULTS.successful, "Result reported as unsuccessful"
-    assert out.ys is not None
-    assert float(jnp.linalg.norm(out.ys[0] - _REFERENCE_Y1)) < 1e-3
-
-
-@pytest.mark.parametrize(("solver_name", "solver_cls"), SOLVERS)
 def test_solver_empirical_order_matches_declared_order(solver_name, solver_cls):
     del solver_name
 

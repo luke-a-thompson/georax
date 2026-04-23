@@ -25,7 +25,7 @@ from georax import (
     AbstractCommutatorFreeSolver,
     AbstractLowStorageCommutatorFreeSolver,
     Euclidean,
-    LocalFlow,
+    LocalChart,
 )
 from georax._geometry import Manifold
 from georax._solver.commutator_free import CommutatorFreeTableau
@@ -49,18 +49,18 @@ class AffineRetractionOps(Manifold):
     def retraction(self, x: Array, v: Array) -> Array:
         return self.scale * x + v
 
-    def select_flow_method(self, required_order) -> LocalFlow:
+    def select_chart(self, required_order) -> LocalChart:
         del required_order
-        flow: LocalFlow = _AffineRetractionFlow()
-        object.__setattr__(self, "flow", flow)
-        return flow
+        chart: LocalChart = _AffineRetractionChart()
+        object.__setattr__(self, "chart", chart)
+        return chart
 
 
-class _AffineRetractionFlow(LocalFlow):
+class _AffineRetractionChart(LocalChart):
     order: int | str = "exact"
     inverse_order: int | str = "exact"
 
-    def forward(self, x: Array, a: Array, geometry: AffineRetractionOps) -> Array:
+    def apply(self, x: Array, a: Array, geometry: AffineRetractionOps) -> Array:
         return geometry.retraction(x, geometry.from_frame(x, a))
 
 
@@ -212,7 +212,7 @@ def test_embedded_pair_returns_error_estimate() -> None:
     assert bool(jnp.allclose(dense_info["y1"], y1))
 
 
-def test_low_storage_recurrence_applies_chained_flows() -> None:
+def test_low_storage_recurrence_applies_chained_charts() -> None:
     recurrence = LowStorageRecurrence(
         A=np.array([0.5]),
         B=np.array([0.5, 1.0]),
