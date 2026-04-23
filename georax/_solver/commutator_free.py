@@ -90,7 +90,7 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
             raise ValueError(
                 f"Got required_order of type {type(required_order)} for solver {self}, expected {RealScalarLike}"
             )
-        geometric_term.geometry.select_flow_method(required_order)
+        geometric_term.geometry.select_chart(required_order)
         del terms, geometric_term
         return None
 
@@ -125,7 +125,7 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
             coeffs = jnp.zeros_like(stages[0])
             for weight, stage in zip(row, stages, strict=True):
                 coeffs = coeffs + jnp.asarray(weight, dtype=stage.dtype) * stage
-            y = geometric_term.frozen_flow(y, coeffs)
+            y = geometric_term.apply_increment(y, coeffs)
         return y
 
     @override
@@ -180,9 +180,13 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
 
 class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
     recurrence: ClassVar[LowStorageRecurrence]
+    embedded_penultimate_exps: ClassVar[tuple[np.ndarray, ...] | None] = None
 
     def error_order(self, terms: GeometricTerm) -> int | None:
-        if not self.recurrence.penultimate_stage_error:
+        if (
+            not self.recurrence.penultimate_stage_error
+            and self.embedded_penultimate_exps is None
+        ):
             return None
         return self.order(terms)
 
@@ -207,10 +211,15 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
         control = terms.contr(t0, t1)
         geometric_term = self._unwrap_geometric_term(terms)
         y0_array = y0
+        stages: list[Array] | None = (
+            [] if self.embedded_penultimate_exps is not None else None
+        )
 
         t_stage0 = t1 if self.recurrence.C[0] == 1.0 else t0 + c[0] * dt
         tmp = geometric_term.coeffs_prod(t_stage0, y0_array, args, control)
-        y1 = geometric_term.frozen_flow(
+        if stages is not None:
+            stages.append(tmp)
+        y1 = geometric_term.apply_increment(
             y0_array, jnp.asarray(b[0], dtype=tmp.dtype) * tmp
         )
 
@@ -222,13 +231,18 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
                 else t0 + c[stage_index] * dt
             )
             coeffs = geometric_term.coeffs_prod(t_stage, y1, args, control)
+            if stages is not None:
+                stages.append(coeffs)
             tmp = jnp.asarray(a[stage_index - 1], dtype=tmp.dtype) * tmp + coeffs
             if (
-                self.recurrence.penultimate_stage_error
+                (
+                    self.recurrence.penultimate_stage_error
+                    or self.embedded_penultimate_exps is not None
+                )
                 and stage_index == self.recurrence.num_stages - 1
             ):
                 y_penultimate = y1
-            y1 = geometric_term.frozen_flow(
+            y1 = geometric_term.apply_increment(
                 y1, jnp.asarray(b[stage_index], dtype=tmp.dtype) * tmp
             )
 
@@ -237,6 +251,20 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
             # This ambient subtraction is acceptable for now; a geometry-aware
             # difference may be preferable for manifold error control later.
             y_error = y1 - y_penultimate
+        if self.embedded_penultimate_exps is not None:
+            if y_penultimate is None or stages is None:
+                raise ValueError(
+                    "Embedded penultimate exponentials require at least two stages."
+                )
+            y_hat = self._apply_exp_product(
+                y_penultimate,
+                self.embedded_penultimate_exps,
+                stages,
+                geometric_term,
+            )
+            # This ambient subtraction is acceptable for now; a geometry-aware
+            # difference may be preferable for manifold error control later.
+            y_error = y1 - y_hat
 
         dense_info = dict(y0=y0, y1=y1)
         return y1, y_error, dense_info, None, RESULTS.successful

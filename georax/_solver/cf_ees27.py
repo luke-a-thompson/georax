@@ -23,7 +23,11 @@ _SolverState = Y
 
 
 class CFEES27(AbstractLowStorageCommutatorFreeSolver, AbstractReversibleSolver):
-    """Commutator-free EES(2,7;1/4) solver with chained exponentials."""
+    """Commutator-free EES(2,7;1/4) solver with chained exponentials.
+
+    Reference:
+        Unpublished work.
+    """
 
     recurrence: ClassVar[LowStorageRecurrence] = _cf_ees27_recurrence
 

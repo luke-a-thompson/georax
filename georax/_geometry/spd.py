@@ -5,10 +5,11 @@ from typing import override
 import equinox as eqx
 from diffrax._custom_types import RealScalarLike
 import jax.numpy as jnp
+import jax.scipy.linalg as jsp_linalg
 import numpy as np
 from jaxtyping import Array
 
-from .base import LocalFlow, Manifold, flow_order
+from .base import LocalChart, Manifold, chart_order
 
 
 def _sym(a: Array) -> Array:
@@ -16,16 +17,14 @@ def _sym(a: Array) -> Array:
 
 
 def _matrix_exp_sym(s: Array) -> Array:
-    s = _sym(s)
-    evals, evecs = jnp.linalg.eigh(s)
-    return (evecs * jnp.exp(evals)) @ evecs.T
+    return _sym(jsp_linalg.expm(_sym(s)))
 
 
-class CongruenceExpFlow(LocalFlow):
-    order: flow_order = "exact"
-    inverse_order: flow_order = "exact"
+class CongruenceExpChart(LocalChart):
+    order: chart_order = "exact"
+    inverse_order: chart_order = "exact"
 
-    def forward(self, x: Array, a: Array, geometry: "SPD") -> Array:
+    def apply(self, x: Array, a: Array, geometry: "SPD") -> Array:
         x = _sym(jnp.asarray(x))
         lift = geometry._coords_to_sym(a)
         g = _matrix_exp_sym(lift)
@@ -40,7 +39,7 @@ class SPD(Manifold):
 
         E_A(x) = A x + x A,
 
-    and the frozen flow is the exact congruence action
+    and the local chart is the exact congruence action
 
         Phi_A(x) = exp(A) x exp(A).
     """
@@ -51,7 +50,7 @@ class SPD(Manifold):
     _upper_j: Array
     _basis: Array
 
-    def __init__(self, n: int, *, flow: LocalFlow | None = None):
+    def __init__(self, n: int, *, chart: LocalChart | None = None):
         n = int(n)
         if n < 1:
             raise ValueError("SPD(n) requires n >= 1.")
@@ -73,7 +72,9 @@ class SPD(Manifold):
         object.__setattr__(self, "_upper_i", jnp.asarray(upper_i))
         object.__setattr__(self, "_upper_j", jnp.asarray(upper_j))
         object.__setattr__(self, "_basis", jnp.asarray(basis))
-        object.__setattr__(self, "flow", CongruenceExpFlow() if flow is None else flow)
+        object.__setattr__(
+            self, "chart", CongruenceExpChart() if chart is None else chart
+        )
 
     @property
     def dimension(self) -> int:
@@ -124,11 +125,11 @@ class SPD(Manifold):
 
     @override
     def retraction(self, x: Array, v: Array) -> Array:
-        return self.frozen_flow(x, self.to_frame(x, v))
+        return self.apply_increment(x, self.to_frame(x, v))
 
     @override
-    def select_flow_method(self, required_order: RealScalarLike) -> LocalFlow:
+    def select_chart(self, required_order: RealScalarLike) -> LocalChart:
         del required_order
-        flow: LocalFlow = CongruenceExpFlow()
-        object.__setattr__(self, "flow", flow)
-        return flow
+        chart: LocalChart = CongruenceExpChart()
+        object.__setattr__(self, "chart", chart)
+        return chart

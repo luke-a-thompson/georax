@@ -13,7 +13,6 @@ from diffrax._solver.runge_kutta import AbstractERK, ButcherTableau
 from diffrax._term import WrapTerm
 from jaxtyping import Array
 
-from georax._geometry import LieGroup
 from georax._term import GeometricTerm
 
 
@@ -96,10 +95,9 @@ class RKMK(AbstractWrappedSolver):
             terms = terms.term
         if not isinstance(terms, GeometricTerm):
             raise TypeError("RKMK requires a GeometricTerm.")
-        if not isinstance(terms.geometry, LieGroup):
-            raise TypeError(
-                f"RKMK requires a LieGroup in the GeometricTerm. Received {terms.geometry}."
-            )
+        chart = terms.geometry.chart
+        if chart is None:
+            raise TypeError("RKMK requires a GeometricTerm geometry with a chart.")
         if not isinstance(terms.inner, ODETerm):
             raise TypeError("RKMK currently only supports ODETerm inputs.")
 
@@ -115,7 +113,7 @@ class RKMK(AbstractWrappedSolver):
                 t_stage = t0
             else:
                 omega = control * _combine(self.tableau.a_lower[i - 1], stage_algebras)
-                y_stage = terms.frozen_flow(y0, omega)
+                y_stage = terms.apply_increment(y0, omega)
                 c_i = self.tableau.c[i - 1]
                 t_stage = t1 if c_i == 1.0 else t0 + c_i * dt
 
@@ -123,18 +121,20 @@ class RKMK(AbstractWrappedSolver):
             alg_stage = terms.geometry.to_frame(y_stage, vf_stage)
             if omega is None:
                 omega = jnp.zeros_like(alg_stage)
-            stage_algebras.append(terms.chart_differential_inv(omega, alg_stage))
+            stage_algebras.append(
+                chart.inverse_differential(y0, omega, alg_stage, terms.geometry)
+            )
             ks.append(terms.prod(vf_stage, control))
 
         omega_sol = control * _combine(self.tableau.b_sol, stage_algebras)
-        y1 = terms.frozen_flow(y0, omega_sol)
+        y1 = terms.apply_increment(y0, omega_sol)
 
         y_error = None
         if self.has_error_estimate:
             omega_embedded = omega_sol - control * _combine(
                 self.tableau.b_error, stage_algebras
             )
-            y_error = y1 - terms.frozen_flow(y0, omega_embedded)
+            y_error = y1 - terms.apply_increment(y0, omega_embedded)
 
         dense_info = dict(y0=y0, y1=y1)
         if self.uses_k_dense_info:

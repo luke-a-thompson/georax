@@ -17,13 +17,22 @@ _cf_ees25_recurrence = LowStorageRecurrence(
     C=np.array([0.0, 1 / 3, 5 / 6]),
 )
 
+_cf_ees25_embedded_penultimate_exps = (np.array([5 / 48, 1 / 16, 0.0]),)
+
 _SolverState = Y
 
 
 class CFEES25(AbstractLowStorageCommutatorFreeSolver, AbstractReversibleSolver):
-    """Commutator-free EES(2,5;1/4) solver with chained exponentials."""
+    """Commutator-free EES(2,5;1/10) solver with chained exponentials.
+
+    Reference:
+        Unpublished work.
+    """
 
     recurrence: ClassVar[LowStorageRecurrence] = _cf_ees25_recurrence
+    embedded_penultimate_exps: ClassVar[tuple[np.ndarray, ...] | None] = (
+        _cf_ees25_embedded_penultimate_exps
+    )
 
     @override
     def init(

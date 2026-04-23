@@ -9,32 +9,35 @@ import numpy as np
 from diffrax._custom_types import RealScalarLike
 from jaxtyping import Array
 
-from .base import LieGroup, LocalFlow, flow_order
+from .base import LocalChart, Manifold, chart_order
 
 
-class CayleyFlow(LocalFlow):
-    order: flow_order = 2
-    inverse_order: flow_order = 2
+class CayleyChart(LocalChart):
+    order: chart_order = 2
+    inverse_order: chart_order = 2
 
-    def forward(self, x: Array, a: Array, geometry: SO) -> Array:
+    def apply(self, x: Array, a: Array, geometry: SO) -> Array:
         omega = geometry._coords_to_alg(a, dtype=x.dtype)
         ident = jnp.eye(geometry.n, dtype=x.dtype)
         q = jnp.linalg.solve(ident - 0.5 * omega, ident + 0.5 * omega)
         return x @ q
 
-    def d_inverse(self, x: Array, y: Array, geometry: SO) -> Array:
-        omega = geometry._coords_to_alg(x)
-        eta = geometry._coords_to_alg(y)
+    def inverse_differential(
+        self, x: Array, a: Array, b: Array, geometry: SO
+    ) -> Array:
+        del x
+        omega = geometry._coords_to_alg(a)
+        eta = geometry._coords_to_alg(b)
         ident = jnp.eye(geometry.n, dtype=eta.dtype)
         corrected = (ident - 0.5 * omega) @ eta @ (ident + 0.5 * omega)
         return geometry._alg_to_coords(corrected)
 
 
-class RodriguesFlow(LocalFlow):
-    order: flow_order = "exact"
-    inverse_order: flow_order = "exact"
+class RodriguesChart(LocalChart):
+    order: chart_order = "exact"
+    inverse_order: chart_order = "exact"
 
-    def forward(self, x: Array, a: Array, geometry: SO) -> Array:
+    def apply(self, x: Array, a: Array, geometry: SO) -> Array:
         if geometry.n != 3:
             raise ValueError("Rodrigues formula is only implemented for SO(3).")
 
@@ -59,25 +62,17 @@ class RodriguesFlow(LocalFlow):
         )
         return x @ q
 
-    def d_inverse(self, x: Array, y: Array, geometry: SO) -> Array:
-        raise NotImplementedError("Rodrigues differential inverse is not implemented.")
 
+class ExpChart(LocalChart):
+    order: chart_order = "exact"
+    inverse_order: chart_order = "exact"
 
-class ExpFlow(LocalFlow):
-    order: flow_order = "exact"
-    inverse_order: flow_order = "exact"
-
-    def forward(self, x: Array, a: Array, geometry: SO) -> Array:
+    def apply(self, x: Array, a: Array, geometry: SO) -> Array:
         omega = geometry._coords_to_alg(a, dtype=x.dtype)
         return x @ jsp_linalg.expm(omega)
 
-    def d_inverse(self, x: Array, y: Array, geometry: SO) -> Array:
-        raise NotImplementedError(
-            "Exponential differential inverse is not implemented."
-        )
 
-
-class SO(LieGroup):
+class SO(Manifold):
     """SO(n) with a left-invariant frame and Cayley retraction."""
 
     n: int = eqx.field(static=True)
@@ -85,7 +80,7 @@ class SO(LieGroup):
     _upper_j: Array
     _basis: Array
 
-    def __init__(self, n: int, *, flow: LocalFlow | None = None):
+    def __init__(self, n: int, *, chart: LocalChart | None = None):
         n = int(n)
         if n < 2:
             raise ValueError("SO(n) requires n >= 2.")
@@ -101,7 +96,7 @@ class SO(LieGroup):
         object.__setattr__(self, "_upper_i", jnp.asarray(upper_i))
         object.__setattr__(self, "_upper_j", jnp.asarray(upper_j))
         object.__setattr__(self, "_basis", jnp.asarray(basis))
-        object.__setattr__(self, "flow", CayleyFlow() if flow is None else flow)
+        object.__setattr__(self, "chart", CayleyChart() if chart is None else chart)
 
     @property
     def lie_algebra_dimension(self) -> int:
@@ -135,21 +130,15 @@ class SO(LieGroup):
 
     @override
     def retraction(self, x: Array, v: Array) -> Array:
-        return self.frozen_flow(x, self.to_frame(x, v))
+        return self.apply_increment(x, self.to_frame(x, v))
 
     @override
-    def chart_differential_inv(self, a: Array, b: Array) -> Array:
-        if self.flow is None:
-            raise NotImplementedError("No local flow is attached to this geometry.")
-        return self.flow.d_inverse(a, b, self)
-
-    @override
-    def select_flow_method(self, required_order: RealScalarLike) -> LocalFlow:
+    def select_chart(self, required_order: RealScalarLike) -> LocalChart:
         match required_order:
             case order if order <= 2:
-                flow: LocalFlow = CayleyFlow()
+                chart: LocalChart = CayleyChart()
             case _:
-                flow = RodriguesFlow() if self.n == 3 else ExpFlow()
+                chart = RodriguesChart() if self.n == 3 else ExpChart()
 
-        object.__setattr__(self, "flow", flow)
-        return flow
+        object.__setattr__(self, "chart", chart)
+        return chart

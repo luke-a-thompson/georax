@@ -9,7 +9,7 @@ from diffrax._custom_types import Args, RealScalarLike, Y
 from diffrax._term import _VF, _Control
 from jaxtyping import Array
 
-from georax._geometry import Manifold, LieGroup
+from georax._geometry import Manifold
 
 
 class GeometricTerm(AbstractTerm[_VF, _Control]):
@@ -64,22 +64,13 @@ class GeometricTerm(AbstractTerm[_VF, _Control]):
         """Return the ambient tangent vector sum_d a_d E_d(x)."""
         return self.geometry.from_frame(x, a)
 
-    def frozen_flow(self, x: Array, a: Array) -> Array:
-        """Apply one frozen subflow at x via the manifold retraction.
+    def apply_increment(self, x: Array, a: Array) -> Array:
+        """Apply one local chart increment at x via the manifold geometry.
 
-        Approximates exp(sum_d a_d E_d) . x by retracting sum_d a_d E_d(x).
+        Approximates exp(sum_d a_d E_d) . x using the geometry's local chart.
         """
-        geometry_frozen_flow = getattr(self.geometry, "frozen_flow", None)
-        if callable(geometry_frozen_flow):
-            return geometry_frozen_flow(x, a)
+        geometry_apply_increment = getattr(self.geometry, "apply_increment", None)
+        if callable(geometry_apply_increment):
+            return geometry_apply_increment(x, a)
         v = self.geometry.from_frame(x, a)
         return self.geometry.retraction(x, v)
-
-    def chart_differential_inv(self, a: Array, b: Array) -> Array:
-        """Apply the inverse left-trivialized chart differential for Lie groups."""
-        if not isinstance(self.geometry, LieGroup):
-            raise TypeError(
-                "Chart differential inversion in algebra coordinates requires "
-                "LieGroupOps."
-            )
-        return self.geometry.chart_differential_inv(a, b)
