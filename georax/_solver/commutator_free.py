@@ -246,25 +246,22 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
                 y1, jnp.asarray(b[stage_index], dtype=tmp.dtype) * tmp
             )
 
+        # Ambient subtraction is acceptable for now; a geometry-aware
+        # difference may be preferable for manifold error control later.
         y_error = None
-        if y_penultimate is not None:
-            # This ambient subtraction is acceptable for now; a geometry-aware
-            # difference may be preferable for manifold error control later.
-            y_error = y1 - y_penultimate
         if self.embedded_penultimate_exps is not None:
-            if y_penultimate is None or stages is None:
-                raise ValueError(
-                    "Embedded penultimate exponentials require at least two stages."
-                )
+            assert y_penultimate is not None and stages is not None, (
+                "Embedded penultimate exponentials require at least two stages."
+            )
             y_hat = self._apply_exp_product(
                 y_penultimate,
                 self.embedded_penultimate_exps,
                 stages,
                 geometric_term,
             )
-            # This ambient subtraction is acceptable for now; a geometry-aware
-            # difference may be preferable for manifold error control later.
             y_error = y1 - y_hat
+        elif y_penultimate is not None:
+            y_error = y1 - y_penultimate
 
         dense_info = dict(y0=y0, y1=y1)
         return y1, y_error, dense_info, None, RESULTS.successful
