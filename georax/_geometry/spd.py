@@ -5,30 +5,17 @@ from typing import override
 import equinox as eqx
 from diffrax._custom_types import RealScalarLike
 import jax.numpy as jnp
-import jax.scipy.linalg as jsp_linalg
 import numpy as np
 from jaxtyping import Array
 
-from .base import LocalChart, Manifold, chart_order
+from .base import LocalChart, Manifold
+from ._charts import (
+    CongruenceExpChart,
+    CongruencePadeChart,
+    _sym,
+)
 
-
-def _sym(a: Array) -> Array:
-    return 0.5 * (a + a.T)
-
-
-def _matrix_exp_sym(s: Array) -> Array:
-    return _sym(jsp_linalg.expm(_sym(s)))
-
-
-class CongruenceExpChart(LocalChart):
-    order: chart_order = "exact"
-    inverse_order: chart_order = "exact"
-
-    def apply(self, x: Array, a: Array, geometry: "SPD") -> Array:
-        x = _sym(jnp.asarray(x))
-        lift = geometry._coords_to_sym(a)
-        g = _matrix_exp_sym(lift)
-        return _sym(g @ x @ g)
+__all__ = ["SPD"]
 
 
 class SPD(Manifold):
@@ -129,7 +116,9 @@ class SPD(Manifold):
 
     @override
     def select_chart(self, required_order: RealScalarLike) -> LocalChart:
-        del required_order
-        chart: LocalChart = CongruenceExpChart()
+        if required_order == "exact":
+            chart: LocalChart = CongruenceExpChart()
+        else:
+            chart = CongruencePadeChart(int(required_order))
         object.__setattr__(self, "chart", chart)
         return chart
