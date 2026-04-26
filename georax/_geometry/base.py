@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from abc import abstractmethod
 from typing import Literal
 
@@ -31,6 +32,8 @@ class LocalChart(eqx.Module):
         ``c = a`` is the d x d restriction of the differential to the frame
         basis at ``y``. Subclasses with closed forms should override.
         """
+        warnings.warn("Using generic inverse differential. Likely slow!")
+
         y = self.apply(x, a, geometry)
 
         def apply_in_frame(c):
