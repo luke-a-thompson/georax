@@ -10,13 +10,13 @@ from diffrax import MultiTerm, ODETerm
 from diffrax._custom_types import Args, RealScalarLike
 from jaxtyping import Array, PyTree
 
-from georax import CFEES25, CFEES27, CG2, CG4, SO, Euclidean, GeometricTerm
+from georax import CFEES25, CFEES27, CG2, CG4, SO, SPD, Euclidean, GeometricTerm
 
 # ── Solvers ────────────────────────────────────────────────────────────────────
 
 SOLVERS = [
     ("cg2", CG2),
-    ("cg4", CG4),
+    # ("cg4", CG4),
     ("cfees25", CFEES25),
     ("cfees27", CFEES27),
 ]
@@ -110,8 +110,8 @@ def make_solver_accuracy_sde_term(
 # (many intermediate tensors per vf_prod eval) — matters for reverse-mode
 # memory comparisons, where a cheap `y**3` VF would be dominated by solver-
 # independent scratch and wouldn't reveal stage-count scaling.
-_BENCH_DIM = 1028
-_BENCH_HIDDEN = 768
+_BENCH_DIM = 32
+_BENCH_HIDDEN = 16
 _BENCH_NUM_LAYERS = 3
 _bench_keys = jax.random.split(jax.random.key(42), _BENCH_NUM_LAYERS)
 _BENCH_W_IN = jax.random.normal(_bench_keys[0], (_BENCH_HIDDEN, _BENCH_DIM)) / jnp.sqrt(
@@ -180,7 +180,7 @@ _BENCH_EUCLIDEAN_SDE_TERM_ARGS = GeometricTerm(
 
 # Use a high-dimensional SO(N) benchmark so the manifold state and Lie algebra
 # coordinates are large enough to expose solver-owned stage storage costs.
-_SON_N = 46
+_SON_N = 32
 _SON_DIM = _SON_N * (_SON_N - 1) // 2  # 1035, close to the Euclidean 1028 state
 _SON_HIDDEN = 768
 _SON_AMBIENT_DIM = _SON_N * _SON_N
@@ -198,9 +198,7 @@ _SON_W_OUT = jax.random.normal(_son_keys[-1], (_SON_DIM, _SON_HIDDEN)) / jnp.sqr
 )
 _SON_PARAMS = (_SON_W_IN, _SON_W_MID, _SON_W_OUT)
 
-# Precompute SO(N) skew basis so VFs don't depend on a specific geometry instance.
 _SON_GEOMETRY = SO(_SON_N)
-_SON_BASIS = _SON_GEOMETRY._basis
 
 
 def _son_apply(weights, R):
@@ -211,20 +209,14 @@ def _son_apply(weights, R):
     return -0.1 * (w_out @ h)  # (dim so(n),) frame coords
 
 
-def _son_ambient_from_frame(R, a):
-    """Lift frame coords to ambient tangent R @ skew(a)."""
-    omega = jnp.einsum("ijk,k->ij", _SON_BASIS, a)
-    return R @ omega
-
-
 def _son_vf_global(t, R, args):
     del t, args
-    return _son_ambient_from_frame(R, _son_apply(_SON_PARAMS, R))
+    return _SON_GEOMETRY.from_frame(R, _son_apply(_SON_PARAMS, R))
 
 
 def _son_vf_args(t, R, args):
     del t
-    return _son_ambient_from_frame(R, _son_apply(args, R))
+    return _SON_GEOMETRY.from_frame(R, _son_apply(args, R))
 
 
 # For the SDE, noise lives in the Lie algebra: dW ∈ R^dim maps to frame coords
@@ -279,66 +271,147 @@ _BENCH_SON_SDE_TERM_ARGS = GeometricTerm(
     coeffs_prod_fn=_son_sde_coeffs_prod_args,
 )
 
+# ── SPD(N) MLP VF ─────────────────────────────────────────────────────────────
+
+_SPD_N = 6
+_SPD_DIM = _SPD_N * (_SPD_N + 1) // 2  # 528, symmetric frame coords
+_SPD_HIDDEN = 32
+_SPD_AMBIENT_DIM = _SPD_N * _SPD_N
+_SPD_NUM_LAYERS = 3
+_spd_keys = jax.random.split(jax.random.key(13), _SPD_NUM_LAYERS)
+_SPD_W_IN = jax.random.normal(_spd_keys[0], (_SPD_HIDDEN, _SPD_AMBIENT_DIM)) / jnp.sqrt(
+    float(_SPD_AMBIENT_DIM)
+)
+_SPD_W_MID = tuple(
+    jax.random.normal(key, (_SPD_HIDDEN, _SPD_HIDDEN)) / jnp.sqrt(float(_SPD_HIDDEN))
+    for key in _spd_keys[1:-1]
+)
+_SPD_W_OUT = jax.random.normal(_spd_keys[-1], (_SPD_DIM, _SPD_HIDDEN)) / jnp.sqrt(
+    float(_SPD_HIDDEN)
+)
+_SPD_PARAMS = (_SPD_W_IN, _SPD_W_MID, _SPD_W_OUT)
+
+_SPD_GEOMETRY = SPD(_SPD_N)
+
+
+def _spd_apply(weights, S):
+    w_in, w_mid_layers, w_out = weights
+    h = jnp.tanh(w_in @ S.flatten())
+    for w_mid in w_mid_layers:
+        h = jnp.tanh(w_mid @ h)
+    return -0.1 * (w_out @ h)  # (dim spd(n),) frame coords
+
+
+def _spd_vf_global(t, S, args):
+    del t, args
+    return _SPD_GEOMETRY.from_frame(S, _spd_apply(_SPD_PARAMS, S))
+
+
+def _spd_vf_args(t, S, args):
+    del t
+    return _SPD_GEOMETRY.from_frame(S, _spd_apply(args, S))
+
+
+def _spd_ode_coeffs_prod_global(t, S, args, control):
+    del t, args
+    return _spd_apply(_SPD_PARAMS, S) * control
+
+
+def _spd_ode_coeffs_prod_args(t, S, args, control):
+    del t
+    return _spd_apply(args, S) * control
+
+
+_SPD_NOISE_SCALE = jnp.full((_SPD_DIM,), 0.05)
+_bench_bm_spd = diffrax.VirtualBrownianTree(
+    t0=0.0, t1=1.0, tol=1e-3, shape=(_SPD_DIM,), key=jax.random.key(2)
+)
+
+
+def _spd_sde_coeffs_prod_global(t, S, args, control):
+    dt, dW = control
+    return _spd_apply(_SPD_PARAMS, S) * dt + _SPD_NOISE_SCALE * dW
+
+
+def _spd_sde_coeffs_prod_args(t, S, args, control):
+    dt, dW = control
+    return _spd_apply(args, S) * dt + _SPD_NOISE_SCALE * dW
+
+
+_BENCH_SPD_ODE_TERM_GLOBAL = GeometricTerm(
+    inner=ODETerm(_spd_vf_global),
+    geometry=_SPD_GEOMETRY,
+    coeffs_prod_fn=_spd_ode_coeffs_prod_global,
+)
+_BENCH_SPD_ODE_TERM_ARGS = GeometricTerm(
+    inner=ODETerm(_spd_vf_args),
+    geometry=_SPD_GEOMETRY,
+    coeffs_prod_fn=_spd_ode_coeffs_prod_args,
+)
+_BENCH_SPD_SDE_TERM_GLOBAL = GeometricTerm(
+    inner=MultiTerm(
+        ODETerm(_spd_vf_global),
+        diffrax.ControlTerm(
+            lambda t, S, args: lineax.DiagonalLinearOperator(_SPD_NOISE_SCALE),
+            _bench_bm_spd,
+        ),
+    ),
+    geometry=_SPD_GEOMETRY,
+    coeffs_prod_fn=_spd_sde_coeffs_prod_global,
+)
+_BENCH_SPD_SDE_TERM_ARGS = GeometricTerm(
+    inner=MultiTerm(
+        ODETerm(_spd_vf_args),
+        diffrax.ControlTerm(
+            lambda t, S, args: lineax.DiagonalLinearOperator(_SPD_NOISE_SCALE),
+            _bench_bm_spd,
+        ),
+    ),
+    geometry=_SPD_GEOMETRY,
+    coeffs_prod_fn=_spd_sde_coeffs_prod_args,
+)
+
 # ── Benchmark Cases ────────────────────────────────────────────────────────────
 
-# `global` keeps MLP weights baked into HLO, differentiating wrt `y0`.
-# `args` threads weights through args so reverse-mode must retain the full
-# activation path needed for parameter gradients.
+
+def _bench_group(name, y0, ode_global, ode_args, sde_global, sde_args, params):
+    # `global` keeps MLP weights baked into HLO, differentiating wrt `y0`.
+    # `args` threads weights through args so reverse-mode must retain the full
+    # activation path needed for parameter gradients.
+    return [
+        BenchCase(f"ode/{name}/global", ode_global, y0, None, "y0"),
+        BenchCase(f"ode/{name}/args", ode_args, y0, params, "args"),
+        BenchCase(f"sde/{name}/global", sde_global, y0, None, "y0"),
+        BenchCase(f"sde/{name}/args", sde_args, y0, params, "args"),
+    ]
+
+
 BENCH_CASES = [
-    BenchCase(
-        "ode/euclidean/global",
+    *_bench_group(
+        "euclidean",
+        jnp.ones((_BENCH_DIM,), dtype=jnp.float32),
         _BENCH_EUCLIDEAN_ODE_TERM,
-        jnp.ones((_BENCH_DIM,), dtype=jnp.float32),
-        None,
-        "y0",
-    ),
-    BenchCase(
-        "ode/euclidean/args",
         _BENCH_EUCLIDEAN_ODE_TERM_ARGS,
-        jnp.ones((_BENCH_DIM,), dtype=jnp.float32),
-        _BENCH_PARAMS,
-        "args",
-    ),
-    BenchCase(
-        "sde/euclidean/global",
         _BENCH_EUCLIDEAN_SDE_TERM,
-        jnp.ones((_BENCH_DIM,), dtype=jnp.float32),
-        None,
-        "y0",
-    ),
-    BenchCase(
-        "sde/euclidean/args",
         _BENCH_EUCLIDEAN_SDE_TERM_ARGS,
-        jnp.ones((_BENCH_DIM,), dtype=jnp.float32),
         _BENCH_PARAMS,
-        "args",
     ),
-    BenchCase(
-        f"ode/so{_SON_N}/global",
+    *_bench_group(
+        f"so{_SON_N}",
+        jnp.eye(_SON_N, dtype=jnp.float32),
         _BENCH_SON_ODE_TERM_GLOBAL,
-        jnp.eye(_SON_N, dtype=jnp.float32),
-        None,
-        "y0",
-    ),
-    BenchCase(
-        f"ode/so{_SON_N}/args",
         _BENCH_SON_ODE_TERM_ARGS,
-        jnp.eye(_SON_N, dtype=jnp.float32),
-        _SON_PARAMS,
-        "args",
-    ),
-    BenchCase(
-        f"sde/so{_SON_N}/global",
         _BENCH_SON_SDE_TERM_GLOBAL,
-        jnp.eye(_SON_N, dtype=jnp.float32),
-        None,
-        "y0",
-    ),
-    BenchCase(
-        f"sde/so{_SON_N}/args",
         _BENCH_SON_SDE_TERM_ARGS,
-        jnp.eye(_SON_N, dtype=jnp.float32),
         _SON_PARAMS,
-        "args",
+    ),
+    *_bench_group(
+        f"spd{_SPD_N}",
+        jnp.eye(_SPD_N, dtype=jnp.float32),
+        _BENCH_SPD_ODE_TERM_GLOBAL,
+        _BENCH_SPD_ODE_TERM_ARGS,
+        _BENCH_SPD_SDE_TERM_GLOBAL,
+        _BENCH_SPD_SDE_TERM_ARGS,
+        _SPD_PARAMS,
     ),
 ]

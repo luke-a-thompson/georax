@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import warnings
+
 import jax.numpy as jnp
 from diffrax import ODETerm
 
 from georax import CG2, SPD, GeometricTerm
+from georax._geometry.base import LocalChart
 
 
 def _is_spd(x: jnp.ndarray) -> bool:
@@ -57,6 +60,21 @@ def test_spd_chart_inverse_differential_is_identity_at_zero() -> None:
     corrected = spd.chart.inverse_differential(x, a, b, spd)
 
     assert bool(jnp.allclose(corrected, b, atol=1e-6))
+
+
+def test_spd_chart_inverse_differential_matches_generic() -> None:
+    spd = SPD(3)
+    x = jnp.array([[1.7, 0.2, 0.1], [0.2, 1.3, 0.05], [0.1, 0.05, 0.9]])
+    a = jnp.array([0.2, -0.3, 0.15, 0.4, -0.25, 0.1])
+    b = jnp.array([0.1, 0.2, -0.15, -0.5, 0.3, 0.05])
+    assert spd.chart is not None
+
+    corrected = spd.chart.inverse_differential(x, a, b, spd)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        generic = LocalChart.inverse_differential(spd.chart, x, a, b, spd)
+
+    assert bool(jnp.allclose(corrected, generic, atol=1e-5, rtol=1e-5))
 
 
 def test_spd_commutator_free_step_preserves_spd() -> None:
