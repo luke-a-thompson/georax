@@ -55,3 +55,4 @@ def test_spd_commutator_free_step_preserves_spd() -> None:
     )
 
     assert _is_spd(y1)
+

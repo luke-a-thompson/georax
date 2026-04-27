@@ -155,3 +155,16 @@ class CongruencePadeChart(LocalChart):
         lift = geometry._coords_to_sym(a)
         g = _pade_expm(lift, self.order)
         return g @ x @ g.T
+
+
+class CongruenceQuadraticChart(LocalChart):
+    order: chart_order = 2
+    inverse_order: chart_order = 2
+
+    def apply(self, x: Array, a: Array, geometry: SPD) -> Array:
+        x = _sym(jnp.asarray(x))
+        lift = geometry._coords_to_sym(a)
+        ident = jnp.eye(geometry.n, dtype=x.dtype)
+        lift_sq = lift @ lift
+        g = ident + lift + jnp.asarray(0.5, dtype=x.dtype) * lift_sq
+        return g @ x @ g.T

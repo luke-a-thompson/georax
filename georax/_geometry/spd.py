@@ -12,6 +12,7 @@ from .base import LocalChart, Manifold
 from ._charts import (
     CongruenceExpChart,
     CongruencePadeChart,
+    CongruenceQuadraticChart,
     _sym,
 )
 
@@ -89,6 +90,8 @@ class SPD(Manifold):
     def select_chart(self, required_order: RealScalarLike) -> LocalChart:
         if required_order == "exact":
             chart: LocalChart = CongruenceExpChart()
+        elif required_order <= 2:
+            chart = CongruenceQuadraticChart()
         else:
             chart = CongruencePadeChart(int(required_order))
         object.__setattr__(self, "chart", chart)
