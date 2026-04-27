@@ -4,7 +4,7 @@ import diffrax
 import jax
 import jax.numpy as jnp
 import pytest
-from conftest import SOLVERS, make_solver_accuracy_term
+from conftest import SOLVERS, make_solver_accuracy_ambient_term, make_solver_accuracy_term
 
 # Improves stability of empirical slope estimation for convergence-order checks.
 jax.config.update("jax_enable_x64", True)
@@ -15,7 +15,7 @@ _Y0 = jnp.eye(3, dtype=jnp.float64)
 _MAX_STEPS = 100_000
 _TERM = make_solver_accuracy_term()
 _REFERENCE = diffrax.diffeqsolve(
-    _TERM.inner,
+    make_solver_accuracy_ambient_term(),
     diffrax.Dopri8(),
     _T0,
     _T1,

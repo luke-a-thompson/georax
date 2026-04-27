@@ -56,25 +56,6 @@ class SO(Manifold):
         return omega[self._upper_i, self._upper_j]
 
     @override
-    def frame(self, x: Array) -> Array:
-        basis = jnp.asarray(self._basis, dtype=x.dtype)
-        return jnp.einsum("ab,bck->ack", x, basis)
-
-    @override
-    def to_frame(self, x: Array, v: Array) -> Array:
-        omega = x.T @ v
-        return omega[self._upper_i, self._upper_j]
-
-    @override
-    def from_frame(self, x: Array, a: Array) -> Array:
-        omega = self._coords_to_alg(a, dtype=x.dtype)
-        return x @ omega
-
-    @override
-    def retraction(self, x: Array, v: Array) -> Array:
-        return self.apply_increment(x, self.to_frame(x, v))
-
-    @override
     def select_chart(self, required_order: RealScalarLike) -> LocalChart:
         if required_order == "exact":
             chart: LocalChart = RodriguesChart() if self.n == 3 else ExpChart()

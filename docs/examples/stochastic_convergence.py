@@ -40,7 +40,7 @@ YLABEL_FORWARD = r"$\log_{10}(\mathcal{E}(h))$"
 YLABEL_BACKWARD = r"$\log_{10}(\overleftarrow{\mathcal{E}}(h))$"
 
 
-def so3_vector_field(t: RealScalarLike, x: Array, args: Args) -> Array:
+def so3_coeffs_matrix(t: RealScalarLike, x: Array, args: Args) -> Array:
     del t, args
     old_coeffs = SIGMA * jnp.array(
         [
@@ -56,7 +56,7 @@ def so3_vector_field(t: RealScalarLike, x: Array, args: Args) -> Array:
         (-old_coeffs[2, :], old_coeffs[1, :], -old_coeffs[0, :]),
         axis=0,
     )
-    return jnp.einsum("ija,ab->ijb", SO3_GEOMETRY.frame(x), coeffs)
+    return coeffs
 
 
 def get_2d_bm(num_steps: int, length: float, key: jax.Array) -> np.ndarray:
@@ -78,9 +78,8 @@ def make_matrix_method_runner(
     solver,
     *,
     geometry,
-    vector_field_fn: Callable[[RealScalarLike, Array, Args], Array],
+    coeffs_matrix_fn: Callable[[RealScalarLike, Array, Args], Array],
     y0_default: np.ndarray,
-    coeffs_prod_fn: Callable[[RealScalarLike, Array, Args, Array], Array] | None = None,
 ) -> Callable[..., np.ndarray]:
     stepsize_controller = diffrax.ConstantStepSize()
     adjoint = ReversibleAdjoint()
@@ -96,13 +95,13 @@ def make_matrix_method_runner(
 
         @jax.jit
         def _run(x: jax.Array, y0: jax.Array) -> jax.Array:
+            control = diffrax.LinearInterpolation(ts=ts, ys=x)
             term = GeometricTerm(
-                inner=diffrax.ControlTerm(
-                    vector_field=vector_field_fn,
-                    control=diffrax.LinearInterpolation(ts=ts, ys=x),
-                ),
                 geometry=geometry,
-                coeffs_prod_fn=coeffs_prod_fn,
+                coeffs_prod=lambda t, y, args, dW: coeffs_matrix_fn(t, y, args) @ dW,
+                control_fn=lambda t0, t1, **kwargs: control.evaluate(
+                    t0, t1, **kwargs
+                ),
             )
             solution = diffrax.diffeqsolve(
                 term,
@@ -137,7 +136,7 @@ def make_so3_method_runner(solver) -> Callable[..., np.ndarray]:
     return make_matrix_method_runner(
         solver,
         geometry=SO3_GEOMETRY,
-        vector_field_fn=so3_vector_field,
+        coeffs_matrix_fn=so3_coeffs_matrix,
         y0_default=np.asarray(SO3_X0, dtype=np.float64),
     )
 

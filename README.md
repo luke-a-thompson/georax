@@ -27,18 +27,12 @@ import jax.numpy as jnp
 from georax import CFEES25, GeometricTerm, RKMK, SO
 
 # Create a toy SO(3) vector field
-def vf(t, y, args):
+def coeffs(t, y, args):
     del t, args
-    return y @ jnp.array(
-        [
-            [0.0, -1.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 0.0, 0.0],
-        ]
-    )
+    return jnp.array([-1.0, 0.0, 0.0])
 
-# Tell Georax that this ODEterm is constrained to SO(3)
-term = GeometricTerm(inner=diffrax.ODETerm(vf), geometry=SO(3))
+# Georax terms are intrinsic: coeffs returns frame/Lie-algebra coordinates.
+term = GeometricTerm(coeffs, geometry=SO(3))
 
 # Wrap a base Diffrax solver to work on a Lie group, or use a specialized manifold solver.
 solvers = (RKMK(diffrax.Dopri5()), CFEES25())
@@ -56,4 +50,9 @@ for solver in solvers:
 
 ```bash
 uv sync
+```
+
+## Benchmarking
+```bash
+uv run pytest tests/test_benchmarks.py -m benchmark -k 'test_solvers_runtime or test_solvers_grad_runtime' -s
 ```

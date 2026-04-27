@@ -4,7 +4,7 @@ import diffrax
 import jax
 import jax.numpy as jnp
 import pytest
-from conftest import make_solver_accuracy_term
+from conftest import make_solver_accuracy_ambient_term, make_solver_accuracy_term
 from diffrax import Heun
 
 from georax import CG2, RKMK, Euclidean, GeometricTerm
@@ -17,7 +17,7 @@ _Y0 = jnp.eye(3, dtype=jnp.float64)
 _MAX_STEPS = 100_000
 _TERM = make_solver_accuracy_term()
 _REFERENCE = diffrax.diffeqsolve(
-    _TERM.inner,
+    make_solver_accuracy_ambient_term(),
     diffrax.Dopri8(),
     _T0,
     _T1,
@@ -39,15 +39,13 @@ def test_rkmk_rejects_non_erk_base_solver() -> None:
 
 def test_rkmk_rejects_non_ode_inner_term() -> None:
     control_term = GeometricTerm(
-        inner=diffrax.ControlTerm(
-            lambda t, y, args: jnp.ones((1, 1)),
-            lambda t0, t1: jnp.array([t1 - t0]),
-        ),
         geometry=Euclidean(),
+        coeffs_prod=lambda t, y, args, control: jnp.ones((1,)),
+        control_fn=lambda t0, t1, **kwargs: jnp.array([t1 - t0]),
     )
     solver = RKMK(Heun())
 
-    with pytest.raises(TypeError, match="ODETerm"):
+    with pytest.raises(TypeError, match="intrinsic ODE coefficients"):
         solver.step(
             terms=control_term,
             t0=0.0,

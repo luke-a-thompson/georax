@@ -5,8 +5,7 @@ from typing import Any, Literal, NamedTuple
 import diffrax
 import jax
 import jax.numpy as jnp
-import lineax
-from diffrax import MultiTerm, ODETerm
+from diffrax import ODETerm
 from diffrax._custom_types import Args, RealScalarLike
 from jaxtyping import Array, PyTree
 
@@ -58,11 +57,19 @@ def so3_body_frame_coeffs(t: RealScalarLike) -> Array:
 
 
 def make_solver_accuracy_term() -> GeometricTerm:
+    def coeffs(t: RealScalarLike, R: Array, args: Args) -> Array:
+        del R, args
+        return so3_body_frame_coeffs(t)
+
+    return GeometricTerm(coeffs, geometry=_SO3_GEOMETRY)
+
+
+def make_solver_accuracy_ambient_term() -> ODETerm:
     def vf(t: RealScalarLike, R: Array, args: Args) -> Array:
         del args
-        return _SO3_GEOMETRY.from_frame(R, so3_body_frame_coeffs(t))
+        return R @ _SO3_GEOMETRY._coords_to_alg(so3_body_frame_coeffs(t), dtype=R.dtype)
 
-    return GeometricTerm(inner=diffrax.ODETerm(vf), geometry=_SO3_GEOMETRY)
+    return diffrax.ODETerm(vf)
 
 
 def make_solver_accuracy_sde_term(
@@ -81,26 +88,18 @@ def make_solver_accuracy_sde_term(
         key=key,
     )
 
-    def vf(t: RealScalarLike, R: Array, args: Args) -> Array:
-        del args
-        return _SO3_GEOMETRY.from_frame(R, so3_body_frame_coeffs(t))
-
-    def diffusion_op(t: RealScalarLike, R: Array, args: Args):
-        del t, R, args
-        return lineax.DiagonalLinearOperator(_SO3_NOISE_SCALE)
-
     def coeffs_prod(t: RealScalarLike, R: Array, args: Args, control) -> Array:
         del R, args
         dt, dW = control
         return so3_body_frame_coeffs(t) * dt + _SO3_NOISE_SCALE * dW
 
     return GeometricTerm(
-        inner=MultiTerm(
-            ODETerm(vf),
-            diffrax.ControlTerm(diffusion_op, brownian),
-        ),
         geometry=_SO3_GEOMETRY,
-        coeffs_prod_fn=coeffs_prod,
+        coeffs_prod=coeffs_prod,
+        control_fn=lambda t0, t1, **kwargs: (
+            t1 - t0,
+            brownian.evaluate(t0, t1, **kwargs),
+        ),
     )
 
 
@@ -149,31 +148,31 @@ _bench_bm_euclidean = diffrax.VirtualBrownianTree(
     t0=0.0, t1=1.0, tol=1e-3, shape=(_BENCH_DIM,), key=jax.random.key(0)
 )
 
-_BENCH_EUCLIDEAN_ODE_TERM = GeometricTerm(
-    inner=ODETerm(_bench_vf_global), geometry=Euclidean()
-)
-_BENCH_EUCLIDEAN_ODE_TERM_ARGS = GeometricTerm(
-    inner=ODETerm(_bench_vf_args), geometry=Euclidean()
-)
+def _bench_sde_coeffs_prod_global(t, y, args, control):
+    dt, dW = control
+    return _bench_apply(_BENCH_PARAMS, y) * dt + 0.1 * y * dW
+
+
+def _bench_sde_coeffs_prod_args(t, y, args, control):
+    dt, dW = control
+    return _bench_apply(args, y) * dt + 0.1 * y * dW
+
+
+def _bench_bm_control(t0, t1, **kwargs):
+    return t1 - t0, _bench_bm_euclidean.evaluate(t0, t1, **kwargs)
+
+
+_BENCH_EUCLIDEAN_ODE_TERM = GeometricTerm(_bench_vf_global, geometry=Euclidean())
+_BENCH_EUCLIDEAN_ODE_TERM_ARGS = GeometricTerm(_bench_vf_args, geometry=Euclidean())
 _BENCH_EUCLIDEAN_SDE_TERM = GeometricTerm(
-    inner=MultiTerm(
-        ODETerm(_bench_vf_global),
-        diffrax.ControlTerm(
-            lambda t, y, args: lineax.DiagonalLinearOperator(0.1 * y),
-            _bench_bm_euclidean,
-        ),
-    ),
     geometry=Euclidean(),
+    coeffs_prod=_bench_sde_coeffs_prod_global,
+    control_fn=_bench_bm_control,
 )
 _BENCH_EUCLIDEAN_SDE_TERM_ARGS = GeometricTerm(
-    inner=MultiTerm(
-        ODETerm(_bench_vf_args),
-        diffrax.ControlTerm(
-            lambda t, y, args: lineax.DiagonalLinearOperator(0.1 * y),
-            _bench_bm_euclidean,
-        ),
-    ),
     geometry=Euclidean(),
+    coeffs_prod=_bench_sde_coeffs_prod_args,
+    control_fn=_bench_bm_control,
 )
 
 # ── SO(N) MLP VF ──────────────────────────────────────────────────────────────
@@ -209,16 +208,6 @@ def _son_apply(weights, R):
     return -0.1 * (w_out @ h)  # (dim so(n),) frame coords
 
 
-def _son_vf_global(t, R, args):
-    del t, args
-    return _SON_GEOMETRY.from_frame(R, _son_apply(_SON_PARAMS, R))
-
-
-def _son_vf_args(t, R, args):
-    del t
-    return _SON_GEOMETRY.from_frame(R, _son_apply(args, R))
-
-
 # For the SDE, noise lives in the Lie algebra: dW ∈ R^dim maps to frame coords
 # via constant scaling. We use coeffs_prod_fn to express this directly in frame
 # coordinates, bypassing the need for a dim -> (N, N) linear operator.
@@ -238,37 +227,27 @@ def _son_sde_coeffs_prod_args(t, R, args, control):
     return _son_apply(args, R) * dt + _SON_NOISE_SCALE * dW
 
 
+def _son_bm_control(t0, t1, **kwargs):
+    return t1 - t0, _bench_bm_son.evaluate(t0, t1, **kwargs)
+
+
 _BENCH_SON_ODE_TERM_GLOBAL = GeometricTerm(
-    inner=ODETerm(_son_vf_global),
+    lambda t, R, args: _son_apply(_SON_PARAMS, R),
     geometry=_SON_GEOMETRY,
 )
 _BENCH_SON_ODE_TERM_ARGS = GeometricTerm(
-    inner=ODETerm(_son_vf_args),
+    lambda t, R, args: _son_apply(args, R),
     geometry=_SON_GEOMETRY,
 )
-# The inner MultiTerm provides contr = (dt, dW); coeffs_prod_fn computes frame
-# coefficients directly, so the ControlTerm VF is never evaluated.
 _BENCH_SON_SDE_TERM_GLOBAL = GeometricTerm(
-    inner=MultiTerm(
-        ODETerm(_son_vf_global),
-        diffrax.ControlTerm(
-            lambda t, R, args: lineax.DiagonalLinearOperator(_SON_NOISE_SCALE),
-            _bench_bm_son,
-        ),
-    ),
     geometry=_SON_GEOMETRY,
-    coeffs_prod_fn=_son_sde_coeffs_prod_global,
+    coeffs_prod=_son_sde_coeffs_prod_global,
+    control_fn=_son_bm_control,
 )
 _BENCH_SON_SDE_TERM_ARGS = GeometricTerm(
-    inner=MultiTerm(
-        ODETerm(_son_vf_args),
-        diffrax.ControlTerm(
-            lambda t, R, args: lineax.DiagonalLinearOperator(_SON_NOISE_SCALE),
-            _bench_bm_son,
-        ),
-    ),
     geometry=_SON_GEOMETRY,
-    coeffs_prod_fn=_son_sde_coeffs_prod_args,
+    coeffs_prod=_son_sde_coeffs_prod_args,
+    control_fn=_son_bm_control,
 )
 
 # ── SPD(N) MLP VF ─────────────────────────────────────────────────────────────
@@ -302,16 +281,6 @@ def _spd_apply(weights, S):
     return -0.1 * (w_out @ h)  # (dim spd(n),) frame coords
 
 
-def _spd_vf_global(t, S, args):
-    del t, args
-    return _SPD_GEOMETRY.from_frame(S, _spd_apply(_SPD_PARAMS, S))
-
-
-def _spd_vf_args(t, S, args):
-    del t
-    return _SPD_GEOMETRY.from_frame(S, _spd_apply(args, S))
-
-
 def _spd_ode_coeffs_prod_global(t, S, args, control):
     del t, args
     return _spd_apply(_SPD_PARAMS, S) * control
@@ -338,37 +307,27 @@ def _spd_sde_coeffs_prod_args(t, S, args, control):
     return _spd_apply(args, S) * dt + _SPD_NOISE_SCALE * dW
 
 
+def _spd_bm_control(t0, t1, **kwargs):
+    return t1 - t0, _bench_bm_spd.evaluate(t0, t1, **kwargs)
+
+
 _BENCH_SPD_ODE_TERM_GLOBAL = GeometricTerm(
-    inner=ODETerm(_spd_vf_global),
+    lambda t, S, args: _spd_apply(_SPD_PARAMS, S),
     geometry=_SPD_GEOMETRY,
-    coeffs_prod_fn=_spd_ode_coeffs_prod_global,
 )
 _BENCH_SPD_ODE_TERM_ARGS = GeometricTerm(
-    inner=ODETerm(_spd_vf_args),
+    lambda t, S, args: _spd_apply(args, S),
     geometry=_SPD_GEOMETRY,
-    coeffs_prod_fn=_spd_ode_coeffs_prod_args,
 )
 _BENCH_SPD_SDE_TERM_GLOBAL = GeometricTerm(
-    inner=MultiTerm(
-        ODETerm(_spd_vf_global),
-        diffrax.ControlTerm(
-            lambda t, S, args: lineax.DiagonalLinearOperator(_SPD_NOISE_SCALE),
-            _bench_bm_spd,
-        ),
-    ),
     geometry=_SPD_GEOMETRY,
-    coeffs_prod_fn=_spd_sde_coeffs_prod_global,
+    coeffs_prod=_spd_sde_coeffs_prod_global,
+    control_fn=_spd_bm_control,
 )
 _BENCH_SPD_SDE_TERM_ARGS = GeometricTerm(
-    inner=MultiTerm(
-        ODETerm(_spd_vf_args),
-        diffrax.ControlTerm(
-            lambda t, S, args: lineax.DiagonalLinearOperator(_SPD_NOISE_SCALE),
-            _bench_bm_spd,
-        ),
-    ),
     geometry=_SPD_GEOMETRY,
-    coeffs_prod_fn=_spd_sde_coeffs_prod_args,
+    coeffs_prod=_spd_sde_coeffs_prod_args,
+    control_fn=_spd_bm_control,
 )
 
 # ── Benchmark Cases ────────────────────────────────────────────────────────────

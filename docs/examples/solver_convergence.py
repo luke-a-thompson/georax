@@ -49,13 +49,20 @@ def vector_field(t: RealScalarLike, y: Array, args: Args) -> Array:
     return y @ skew
 
 
+def frame_coeffs(t: RealScalarLike, y: Array, args: Args) -> Array:
+    del y, args
+    omega = omega_body(t)
+    return jnp.array([-omega[2], omega[1], -omega[0]], dtype=omega.dtype)
+
+
 def make_term() -> GeometricTerm:
-    return GeometricTerm(inner=diffrax.ODETerm(vector_field), geometry=SO(3))
+    return GeometricTerm(frame_coeffs, geometry=SO(3))
 
 
 def reference_solution(term: GeometricTerm, y0: Array) -> Array:
+    del term
     solution = diffrax.diffeqsolve(
-        term.inner,
+        diffrax.ODETerm(vector_field),
         diffrax.Dopri8(),
         T0,
         T1,

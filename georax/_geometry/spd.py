@@ -86,35 +86,6 @@ class SPD(Manifold):
         return jnp.concatenate((diag, off_diag))
 
     @override
-    def frame(self, x: Array) -> Array:
-        x = _sym(jnp.asarray(x))
-        basis = jnp.asarray(self._basis, dtype=x.dtype)
-        left = jnp.einsum("abk,bc->ack", basis, x)
-        right = jnp.einsum("ab,bck->ack", x, basis)
-        return left + right
-
-    @override
-    def to_frame(self, x: Array, v: Array) -> Array:
-        x = _sym(jnp.asarray(x))
-        v = _sym(jnp.asarray(v))
-        evals, evecs = jnp.linalg.eigh(x)
-        v_hat = evecs.T @ v @ evecs
-        denom = evals[:, None] + evals[None, :]
-        lift_hat = v_hat / denom
-        lift = _sym(evecs @ lift_hat @ evecs.T)
-        return self._sym_to_coords(lift)
-
-    @override
-    def from_frame(self, x: Array, a: Array) -> Array:
-        x = _sym(jnp.asarray(x))
-        lift = self._coords_to_sym(a)
-        return _sym(lift @ x + x @ lift)
-
-    @override
-    def retraction(self, x: Array, v: Array) -> Array:
-        return self.apply_increment(x, self.to_frame(x, v))
-
-    @override
     def select_chart(self, required_order: RealScalarLike) -> LocalChart:
         if required_order == "exact":
             chart: LocalChart = CongruenceExpChart()

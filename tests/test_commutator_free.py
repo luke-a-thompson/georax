@@ -8,9 +8,6 @@ import numpy as np
 import pytest
 from diffrax import (
     CheckpointedReversibleAdjoint,
-    ControlTerm,
-    MultiTerm,
-    ODETerm,
     SaveAt,
     VirtualBrownianTree,
     diffeqsolve,
@@ -35,19 +32,9 @@ from georax._term import GeometricTerm
 class AffineRetractionOps(Manifold):
     scale: float = 1.0
 
-    def frame(self, x: Array) -> Array:
-        return jnp.eye(x.shape[0], dtype=x.dtype)
-
-    def to_frame(self, x: Array, v: Array) -> Array:
-        del x
-        return v
-
-    def from_frame(self, x: Array, a: Array) -> Array:
-        del x
-        return a
-
-    def retraction(self, x: Array, v: Array) -> Array:
-        return self.scale * x + v
+    def __init__(self, scale: float = 1.0):
+        object.__setattr__(self, "scale", scale)
+        object.__setattr__(self, "chart", _AffineRetractionChart())
 
     def select_chart(self, required_order) -> LocalChart:
         del required_order
@@ -61,7 +48,7 @@ class _AffineRetractionChart(LocalChart):
     inverse_order: int | str = "exact"
 
     def apply(self, x: Array, a: Array, geometry: AffineRetractionOps) -> Array:
-        return geometry.retraction(x, geometry.from_frame(x, a))
+        return geometry.scale * x + a
 
 
 class TableauSolver(AbstractCommutatorFreeSolver):
@@ -91,7 +78,7 @@ def _low_storage_solver_type(name: str, recurrence: LowStorageRecurrence, order:
 
 
 def _make_term(vf, geometry: Manifold) -> GeometricTerm:
-    return GeometricTerm(inner=ODETerm(vf), geometry=geometry)
+    return GeometricTerm(vf, geometry=geometry)
 
 
 def _run_step(
@@ -237,11 +224,11 @@ def test_low_storage_recurrence_applies_chained_charts() -> None:
 
 def test_control_term_uses_vf_prod_for_stage_coefficients() -> None:
     solver = CG2()
-    inner = ControlTerm(
-        lambda t, y, args: jnp.array([[3.0, -1.0]]),
-        lambda t0, t1: jnp.array([2.0, -1.0]),
+    term = GeometricTerm(
+        geometry=Euclidean(),
+        coeffs_prod=lambda t, y, args, control: jnp.array([[3.0, -1.0]]) @ control,
+        control_fn=lambda t0, t1, **kwargs: jnp.array([2.0, -1.0]),
     )
-    term = GeometricTerm(inner=inner, geometry=Euclidean())
 
     y1, _, _, _, _ = _run_step(solver, term)
 
@@ -250,14 +237,12 @@ def test_control_term_uses_vf_prod_for_stage_coefficients() -> None:
 
 def test_multiterm_combines_drift_and_control_increments() -> None:
     solver = CG2()
-    inner = MultiTerm(
-        ODETerm(lambda t, y, args: jnp.array([2.0])),
-        ControlTerm(
-            lambda t, y, args: jnp.array([[3.0, -1.0]]),
-            lambda t0, t1: jnp.array([2.0, -1.0]),
-        ),
+    term = GeometricTerm(
+        geometry=Euclidean(),
+        coeffs_prod=lambda t, y, args, control: jnp.array([2.0]) * control[0]
+        + jnp.array([[3.0, -1.0]]) @ control[1],
+        control_fn=lambda t0, t1, **kwargs: (t1 - t0, jnp.array([2.0, -1.0])),
     )
-    term = GeometricTerm(inner=inner, geometry=Euclidean())
 
     y1, _, _, _, _ = _run_step(solver, term)
 
@@ -266,11 +251,9 @@ def test_multiterm_combines_drift_and_control_increments() -> None:
 
 def test_diffeqsolve_accepts_control_terms() -> None:
     term = GeometricTerm(
-        inner=ControlTerm(
-            lambda t, y, args: jnp.array([[3.0, -1.0]]),
-            lambda t0, t1: jnp.array([2.0, -1.0]),
-        ),
         geometry=Euclidean(),
+        coeffs_prod=lambda t, y, args, control: jnp.array([[3.0, -1.0]]) @ control,
+        control_fn=lambda t0, t1, **kwargs: jnp.array([2.0, -1.0]),
     )
     solution = diffeqsolve(
         term,
@@ -291,8 +274,9 @@ def test_spd_control_term_step_preserves_spd() -> None:
     geometry = SPD(3)
     control = jnp.array([0.08, -0.04, 0.03, 0.02, -0.01, 0.05])
     term = GeometricTerm(
-        inner=ControlTerm(lambda t, x, args: geometry.frame(x), lambda t0, t1: control),
         geometry=geometry,
+        coeffs_prod=lambda t, x, args, control: control,
+        control_fn=lambda t0, t1, **kwargs: control,
     )
 
     y0 = jnp.array(
@@ -324,8 +308,9 @@ def test_cfees25_supports_checkpointed_reversible_adjoint() -> None:
         key=key,
     )
     term = GeometricTerm(
-        inner=ControlTerm(lambda t, y, args: jnp.ones((1, 1)), path),
         geometry=Euclidean(),
+        coeffs_prod=lambda t, y, args, control: control,
+        control=path,
     )
 
     solution = diffeqsolve(

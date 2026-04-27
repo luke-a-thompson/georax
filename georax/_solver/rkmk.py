@@ -5,7 +5,7 @@ from typing import override
 import equinox as eqx
 import jax.numpy as jnp
 import numpy as np
-from diffrax import RESULTS, ODETerm
+from diffrax import RESULTS
 from diffrax._custom_types import VF, Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
 from diffrax._local_interpolation import LocalLinearInterpolation
 from diffrax._solver.base import AbstractSolver, AbstractWrappedSolver
@@ -98,8 +98,13 @@ class RKMK(AbstractWrappedSolver):
         chart = terms.geometry.chart
         if chart is None:
             raise TypeError("RKMK requires a GeometricTerm geometry with a chart.")
-        if not isinstance(terms.inner, ODETerm):
-            raise TypeError("RKMK currently only supports ODETerm inputs.")
+        if (
+            terms.coeffs_fn is None
+            or terms.coeffs_prod_fn is not None
+            or terms.control is not None
+            or terms.control_fn is not None
+        ):
+            raise TypeError("RKMK currently only supports intrinsic ODE coefficients.")
 
         control = jnp.asarray(terms.contr(t0, t1))
         dt = t1 - t0
@@ -117,14 +122,13 @@ class RKMK(AbstractWrappedSolver):
                 c_i = self.tableau.c[i - 1]
                 t_stage = t1 if c_i == 1.0 else t0 + c_i * dt
 
-            vf_stage = terms.vf(t_stage, y_stage, args)
-            alg_stage = terms.geometry.to_frame(y_stage, vf_stage)
+            alg_stage = terms.coeffs(t_stage, y_stage, args)
             if omega is None:
                 omega = jnp.zeros_like(alg_stage)
             stage_algebras.append(
                 chart.inverse_differential(y0, omega, alg_stage, terms.geometry)
             )
-            ks.append(terms.prod(vf_stage, control))
+            ks.append(jnp.zeros_like(y_stage))
 
         omega_sol = control * _combine(self.tableau.b_sol, stage_algebras)
         y1 = terms.apply_increment(y0, omega_sol)
