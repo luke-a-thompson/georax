@@ -2,7 +2,7 @@ from .base import LocalChart, Manifold
 from ._charts import (
     CayleyChart,
     CongruenceExpChart,
-    CongruencePadeChart,
+    CongruenceTaylorChart,
     ExpChart,
     PadeChart,
     RodriguesChart,
@@ -16,7 +16,7 @@ __all__ = [
     "LocalChart",
     "CayleyChart",
     "CongruenceExpChart",
-    "CongruencePadeChart",
+    "CongruenceTaylorChart",
     "ExpChart",
     "PadeChart",
     "RodriguesChart",
