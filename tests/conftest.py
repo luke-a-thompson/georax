@@ -24,14 +24,9 @@ SOLVERS = [
 BENCH_SOLVERS = SOLVERS
 
 
-class GeneralShARKSRKMK(SRKMK):
-    def __init__(self):
-        super().__init__(diffrax.GeneralShARK())
-
-
 SDE_BENCH_SOLVERS = [
     *BENCH_SOLVERS,
-    ("srkmk_gen_shark", GeneralShARKSRKMK),
+    ("srkmk_gen_shark", lambda: SRKMK(diffrax.GeneralShARK())),
 ]
 
 
