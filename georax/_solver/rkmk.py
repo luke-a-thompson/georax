@@ -13,7 +13,7 @@ from diffrax._solver.runge_kutta import AbstractERK, ButcherTableau
 from diffrax._term import WrapTerm
 from jaxtyping import Array
 
-from georax._term import GeometricTerm
+from georax._term import GeometricTerm, select_chart_for_solver
 
 
 def _combine(weights: np.ndarray, values: list[Array]) -> Array:
@@ -66,13 +66,7 @@ class RKMK(AbstractWrappedSolver):
         args: Args,
     ) -> None:
         del t0, t1, y0, args
-        geometric_term = self._unwrap_geometric_term(terms)
-        required_order = self.order(geometric_term)
-        if required_order is None:
-            raise ValueError(
-                f"Got required_order of type {type(required_order)} for solver {self}, expected {RealScalarLike}"
-            )
-        geometric_term.geometry.select_chart(required_order)
+        select_chart_for_solver(self, self._unwrap_geometric_term(terms))
         return None
 
     @override
@@ -111,13 +105,6 @@ class RKMK(AbstractWrappedSolver):
         chart = terms.geometry.chart
         if chart is None:
             raise TypeError("RKMK requires a GeometricTerm geometry with a chart.")
-        if (
-            terms.coeffs_fn is None
-            or terms.coeffs_prod_fn is not None
-            or terms.control is not None
-            or terms.control_fn is not None
-        ):
-            raise TypeError("RKMK currently only supports intrinsic ODE coefficients.")
 
         control = jnp.asarray(terms.contr(t0, t1))
         dt = t1 - t0
@@ -148,10 +135,8 @@ class RKMK(AbstractWrappedSolver):
 
         y_error = None
         if self.has_error_estimate:
-            omega_embedded = omega_sol - control * _combine(
-                self.tableau.b_error, stage_algebras
-            )
-            y_error = y1 - terms.apply_increment(y0, omega_embedded)
+            omega_error = control * _combine(self.tableau.b_error, stage_algebras)
+            y_error = terms.apply_increment(y0, omega_error) - y0
 
         dense_info = dict(y0=y0, y1=y1)
         if self.uses_k_dense_info:

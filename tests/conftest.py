@@ -5,11 +5,12 @@ from typing import Any, Literal, NamedTuple
 import diffrax
 import jax
 import jax.numpy as jnp
-from diffrax import ODETerm
+import lineax as lx
+from diffrax import AbstractTerm, ControlTerm, MultiTerm, ODETerm
 from diffrax._custom_types import Args, RealScalarLike
 from jaxtyping import Array, PyTree
 
-from georax import CFEES25, CFEES27, CG2, CG4, SO, SPD, Euclidean, GeometricTerm
+from georax import CFEES25, CFEES27, CG2, CG4, SO, SPD, Euclidean, GeometricTerm, SRKMK
 
 # ── Solvers ────────────────────────────────────────────────────────────────────
 
@@ -23,12 +24,29 @@ SOLVERS = [
 BENCH_SOLVERS = SOLVERS
 
 
+class GeneralShARKSRKMK(SRKMK):
+    def __init__(self):
+        super().__init__(diffrax.GeneralShARK())
+
+
+SDE_BENCH_SOLVERS = [
+    *BENCH_SOLVERS,
+    ("srkmk_gen_shark", GeneralShARKSRKMK),
+]
+
+
+def bench_solvers_for_case(case: "BenchCase"):
+    if case.name.startswith("sde/") and "/spd" not in case.name:
+        return SDE_BENCH_SOLVERS
+    return BENCH_SOLVERS
+
+
 # ── BenchCase ──────────────────────────────────────────────────────────────────
 
 
 class BenchCase(NamedTuple):
     name: str
-    term: GeometricTerm
+    term: AbstractTerm
     y0: Any
     args: PyTree | None
     grad_target: Literal["y0", "args"]
@@ -76,7 +94,7 @@ def make_solver_accuracy_sde_term(
     *,
     bm_tol: float = 1e-3,
     key: Array | None = None,
-) -> GeometricTerm:
+) -> AbstractTerm:
     if key is None:
         key = jax.random.key(0)
 
@@ -88,18 +106,17 @@ def make_solver_accuracy_sde_term(
         key=key,
     )
 
-    def coeffs_prod(t: RealScalarLike, R: Array, args: Args, control) -> Array:
+    def coeffs(t: RealScalarLike, R: Array, args: Args) -> Array:
         del R, args
-        dt, dW = control
-        return so3_body_frame_coeffs(t) * dt + _SO3_NOISE_SCALE * dW
+        return so3_body_frame_coeffs(t)
 
-    return GeometricTerm(
-        geometry=_SO3_GEOMETRY,
-        coeffs_prod=coeffs_prod,
-        control_fn=lambda t0, t1, **kwargs: (
-            t1 - t0,
-            brownian.evaluate(t0, t1, **kwargs),
-        ),
+    def diffusion(t: RealScalarLike, R: Array, args: Args):
+        del t, R, args
+        return lx.DiagonalLinearOperator(_SO3_NOISE_SCALE)
+
+    return MultiTerm(
+        GeometricTerm(coeffs, geometry=_SO3_GEOMETRY),
+        ControlTerm(diffusion, brownian),
     )
 
 
@@ -145,34 +162,29 @@ def _bench_vf_args(t, y, args):
 
 
 _bench_bm_euclidean = diffrax.VirtualBrownianTree(
-    t0=0.0, t1=1.0, tol=1e-3, shape=(_BENCH_DIM,), key=jax.random.key(0)
+    t0=0.0,
+    t1=1.0,
+    tol=1e-3,
+    shape=(_BENCH_DIM,),
+    key=jax.random.key(0),
+    levy_area=diffrax.SpaceTimeLevyArea,
 )
 
-def _bench_sde_coeffs_prod_global(t, y, args, control):
-    dt, dW = control
-    return _bench_apply(_BENCH_PARAMS, y) * dt + 0.1 * y * dW
 
-
-def _bench_sde_coeffs_prod_args(t, y, args, control):
-    dt, dW = control
-    return _bench_apply(args, y) * dt + 0.1 * y * dW
-
-
-def _bench_bm_control(t0, t1, **kwargs):
-    return t1 - t0, _bench_bm_euclidean.evaluate(t0, t1, **kwargs)
+def _bench_sde_diffusion(t, y, args):
+    del t, args
+    return lx.DiagonalLinearOperator(0.1 * y)
 
 
 _BENCH_EUCLIDEAN_ODE_TERM = GeometricTerm(_bench_vf_global, geometry=Euclidean())
 _BENCH_EUCLIDEAN_ODE_TERM_ARGS = GeometricTerm(_bench_vf_args, geometry=Euclidean())
-_BENCH_EUCLIDEAN_SDE_TERM = GeometricTerm(
-    geometry=Euclidean(),
-    coeffs_prod=_bench_sde_coeffs_prod_global,
-    control_fn=_bench_bm_control,
+_BENCH_EUCLIDEAN_SDE_TERM = MultiTerm(
+    GeometricTerm(_bench_vf_global, geometry=Euclidean()),
+    ControlTerm(_bench_sde_diffusion, _bench_bm_euclidean),
 )
-_BENCH_EUCLIDEAN_SDE_TERM_ARGS = GeometricTerm(
-    geometry=Euclidean(),
-    coeffs_prod=_bench_sde_coeffs_prod_args,
-    control_fn=_bench_bm_control,
+_BENCH_EUCLIDEAN_SDE_TERM_ARGS = MultiTerm(
+    GeometricTerm(_bench_vf_args, geometry=Euclidean()),
+    ControlTerm(_bench_sde_diffusion, _bench_bm_euclidean),
 )
 
 # ── SO(N) MLP VF ──────────────────────────────────────────────────────────────
@@ -208,27 +220,22 @@ def _son_apply(weights, R):
     return -0.1 * (w_out @ h)  # (dim so(n),) frame coords
 
 
-# For the SDE, noise lives in the Lie algebra: dW ∈ R^dim maps to frame coords
-# via constant scaling. We use coeffs_prod_fn to express this directly in frame
-# coordinates, bypassing the need for a dim -> (N, N) linear operator.
+# For the SDE, noise lives in the Lie algebra: dW in R^dim maps directly to
+# frame coordinates via constant diagonal scaling.
 _SON_NOISE_SCALE = jnp.full((_SON_DIM,), 0.05)
 _bench_bm_son = diffrax.VirtualBrownianTree(
-    t0=0.0, t1=1.0, tol=1e-3, shape=(_SON_DIM,), key=jax.random.key(1)
+    t0=0.0,
+    t1=1.0,
+    tol=1e-3,
+    shape=(_SON_DIM,),
+    key=jax.random.key(1),
+    levy_area=diffrax.SpaceTimeLevyArea,
 )
 
 
-def _son_sde_coeffs_prod_global(t, R, args, control):
-    dt, dW = control
-    return _son_apply(_SON_PARAMS, R) * dt + _SON_NOISE_SCALE * dW
-
-
-def _son_sde_coeffs_prod_args(t, R, args, control):
-    dt, dW = control
-    return _son_apply(args, R) * dt + _SON_NOISE_SCALE * dW
-
-
-def _son_bm_control(t0, t1, **kwargs):
-    return t1 - t0, _bench_bm_son.evaluate(t0, t1, **kwargs)
+def _son_sde_diffusion(t, R, args):
+    del t, R, args
+    return lx.DiagonalLinearOperator(_SON_NOISE_SCALE)
 
 
 _BENCH_SON_ODE_TERM_GLOBAL = GeometricTerm(
@@ -239,15 +246,15 @@ _BENCH_SON_ODE_TERM_ARGS = GeometricTerm(
     lambda t, R, args: _son_apply(args, R),
     geometry=_SON_GEOMETRY,
 )
-_BENCH_SON_SDE_TERM_GLOBAL = GeometricTerm(
-    geometry=_SON_GEOMETRY,
-    coeffs_prod=_son_sde_coeffs_prod_global,
-    control_fn=_son_bm_control,
+_BENCH_SON_SDE_TERM_GLOBAL = MultiTerm(
+    GeometricTerm(
+        lambda t, R, args: _son_apply(_SON_PARAMS, R), geometry=_SON_GEOMETRY
+    ),
+    ControlTerm(_son_sde_diffusion, _bench_bm_son),
 )
-_BENCH_SON_SDE_TERM_ARGS = GeometricTerm(
-    geometry=_SON_GEOMETRY,
-    coeffs_prod=_son_sde_coeffs_prod_args,
-    control_fn=_son_bm_control,
+_BENCH_SON_SDE_TERM_ARGS = MultiTerm(
+    GeometricTerm(lambda t, R, args: _son_apply(args, R), geometry=_SON_GEOMETRY),
+    ControlTerm(_son_sde_diffusion, _bench_bm_son),
 )
 
 # ── SPD(N) MLP VF ─────────────────────────────────────────────────────────────
@@ -281,34 +288,20 @@ def _spd_apply(weights, S):
     return -0.1 * (w_out @ h)  # (dim spd(n),) frame coords
 
 
-def _spd_ode_coeffs_prod_global(t, S, args, control):
-    del t, args
-    return _spd_apply(_SPD_PARAMS, S) * control
-
-
-def _spd_ode_coeffs_prod_args(t, S, args, control):
-    del t
-    return _spd_apply(args, S) * control
-
-
 _SPD_NOISE_SCALE = jnp.full((_SPD_DIM,), 0.05)
 _bench_bm_spd = diffrax.VirtualBrownianTree(
-    t0=0.0, t1=1.0, tol=1e-3, shape=(_SPD_DIM,), key=jax.random.key(2)
+    t0=0.0,
+    t1=1.0,
+    tol=1e-3,
+    shape=(_SPD_DIM,),
+    key=jax.random.key(2),
+    levy_area=diffrax.SpaceTimeLevyArea,
 )
 
 
-def _spd_sde_coeffs_prod_global(t, S, args, control):
-    dt, dW = control
-    return _spd_apply(_SPD_PARAMS, S) * dt + _SPD_NOISE_SCALE * dW
-
-
-def _spd_sde_coeffs_prod_args(t, S, args, control):
-    dt, dW = control
-    return _spd_apply(args, S) * dt + _SPD_NOISE_SCALE * dW
-
-
-def _spd_bm_control(t0, t1, **kwargs):
-    return t1 - t0, _bench_bm_spd.evaluate(t0, t1, **kwargs)
+def _spd_sde_diffusion(t, S, args):
+    del t, S, args
+    return lx.DiagonalLinearOperator(_SPD_NOISE_SCALE)
 
 
 _BENCH_SPD_ODE_TERM_GLOBAL = GeometricTerm(
@@ -319,15 +312,15 @@ _BENCH_SPD_ODE_TERM_ARGS = GeometricTerm(
     lambda t, S, args: _spd_apply(args, S),
     geometry=_SPD_GEOMETRY,
 )
-_BENCH_SPD_SDE_TERM_GLOBAL = GeometricTerm(
-    geometry=_SPD_GEOMETRY,
-    coeffs_prod=_spd_sde_coeffs_prod_global,
-    control_fn=_spd_bm_control,
+_BENCH_SPD_SDE_TERM_GLOBAL = MultiTerm(
+    GeometricTerm(
+        lambda t, S, args: _spd_apply(_SPD_PARAMS, S), geometry=_SPD_GEOMETRY
+    ),
+    ControlTerm(_spd_sde_diffusion, _bench_bm_spd),
 )
-_BENCH_SPD_SDE_TERM_ARGS = GeometricTerm(
-    geometry=_SPD_GEOMETRY,
-    coeffs_prod=_spd_sde_coeffs_prod_args,
-    control_fn=_spd_bm_control,
+_BENCH_SPD_SDE_TERM_ARGS = MultiTerm(
+    GeometricTerm(lambda t, S, args: _spd_apply(args, S), geometry=_SPD_GEOMETRY),
+    ControlTerm(_spd_sde_diffusion, _bench_bm_spd),
 )
 
 # ── Benchmark Cases ────────────────────────────────────────────────────────────

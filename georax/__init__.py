@@ -4,6 +4,7 @@ from georax._solver import (
     CG2,
     CG4,
     RKMK,
+    SRKMK,
     AbstractCommutatorFreeSolver,
     AbstractLowStorageCommutatorFreeSolver,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "CFEES25",
     "CFEES27",
     "RKMK",
+    "SRKMK",
     "Manifold",
     "LocalChart",
     "Euclidean",

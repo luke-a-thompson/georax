@@ -9,3 +9,4 @@ from .commutator_free import (
     AbstractLowStorageCommutatorFreeSolver as AbstractLowStorageCommutatorFreeSolver,
 )
 from .rkmk import RKMK as RKMK
+from .srkmk import SRKMK as SRKMK

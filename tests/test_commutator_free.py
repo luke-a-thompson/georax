@@ -8,6 +8,8 @@ import numpy as np
 import pytest
 from diffrax import (
     CheckpointedReversibleAdjoint,
+    ControlTerm,
+    MultiTerm,
     SaveAt,
     VirtualBrownianTree,
     diffeqsolve,
@@ -224,10 +226,12 @@ def test_low_storage_recurrence_applies_chained_charts() -> None:
 
 def test_control_term_uses_vf_prod_for_stage_coefficients() -> None:
     solver = CG2()
-    term = GeometricTerm(
-        geometry=Euclidean(),
-        coeffs_prod=lambda t, y, args, control: jnp.array([[3.0, -1.0]]) @ control,
-        control_fn=lambda t0, t1, **kwargs: jnp.array([2.0, -1.0]),
+    term = MultiTerm(
+        GeometricTerm(lambda t, y, args: jnp.zeros_like(y), geometry=Euclidean()),
+        ControlTerm(
+            lambda t, y, args: jnp.array([[3.0, -1.0]]),
+            lambda t0, t1, **kwargs: jnp.array([2.0, -1.0]),
+        ),
     )
 
     y1, _, _, _, _ = _run_step(solver, term)
@@ -237,11 +241,12 @@ def test_control_term_uses_vf_prod_for_stage_coefficients() -> None:
 
 def test_multiterm_combines_drift_and_control_increments() -> None:
     solver = CG2()
-    term = GeometricTerm(
-        geometry=Euclidean(),
-        coeffs_prod=lambda t, y, args, control: jnp.array([2.0]) * control[0]
-        + jnp.array([[3.0, -1.0]]) @ control[1],
-        control_fn=lambda t0, t1, **kwargs: (t1 - t0, jnp.array([2.0, -1.0])),
+    term = MultiTerm(
+        GeometricTerm(lambda t, y, args: jnp.array([2.0]), geometry=Euclidean()),
+        ControlTerm(
+            lambda t, y, args: jnp.array([[3.0, -1.0]]),
+            lambda t0, t1, **kwargs: jnp.array([2.0, -1.0]),
+        ),
     )
 
     y1, _, _, _, _ = _run_step(solver, term)
@@ -250,10 +255,12 @@ def test_multiterm_combines_drift_and_control_increments() -> None:
 
 
 def test_diffeqsolve_accepts_control_terms() -> None:
-    term = GeometricTerm(
-        geometry=Euclidean(),
-        coeffs_prod=lambda t, y, args, control: jnp.array([[3.0, -1.0]]) @ control,
-        control_fn=lambda t0, t1, **kwargs: jnp.array([2.0, -1.0]),
+    term = MultiTerm(
+        GeometricTerm(lambda t, y, args: jnp.zeros_like(y), geometry=Euclidean()),
+        ControlTerm(
+            lambda t, y, args: jnp.array([[3.0, -1.0]]),
+            lambda t0, t1, **kwargs: jnp.array([2.0, -1.0]),
+        ),
     )
     solution = diffeqsolve(
         term,
@@ -273,10 +280,12 @@ def test_diffeqsolve_accepts_control_terms() -> None:
 def test_spd_control_term_step_preserves_spd() -> None:
     geometry = SPD(3)
     control = jnp.array([0.08, -0.04, 0.03, 0.02, -0.01, 0.05])
-    term = GeometricTerm(
-        geometry=geometry,
-        coeffs_prod=lambda t, x, args, control: control,
-        control_fn=lambda t0, t1, **kwargs: control,
+    term = MultiTerm(
+        GeometricTerm(lambda t, x, args: jnp.zeros_like(control), geometry=geometry),
+        ControlTerm(
+            lambda t, x, args: jnp.eye(geometry.dimension),
+            lambda t0, t1, **kwargs: control,
+        ),
     )
 
     y0 = jnp.array(
@@ -307,10 +316,9 @@ def test_cfees25_supports_checkpointed_reversible_adjoint() -> None:
         shape=(1,),
         key=key,
     )
-    term = GeometricTerm(
-        geometry=Euclidean(),
-        coeffs_prod=lambda t, y, args, control: control,
-        control=path,
+    term = MultiTerm(
+        GeometricTerm(lambda t, y, args: jnp.zeros_like(y), geometry=Euclidean()),
+        ControlTerm(lambda t, y, args: jnp.eye(1), path),
     )
 
     solution = diffeqsolve(

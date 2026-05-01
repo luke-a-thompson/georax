@@ -126,7 +126,7 @@ class CayleyChart(LocalChart):
         omega = geometry._coords_to_alg(a)
         eta = geometry._coords_to_alg(b)
         ident = jnp.eye(geometry.n, dtype=eta.dtype)
-        corrected = (ident - 0.5 * omega) @ eta @ (ident + 0.5 * omega)
+        corrected = (ident + 0.5 * omega) @ eta @ (ident - 0.5 * omega)
         return geometry._alg_to_coords(corrected)
 
 

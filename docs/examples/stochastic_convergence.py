@@ -1,5 +1,7 @@
 """Pathwise stochastic convergence experiment for the georax CF solvers."""
 
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import argparse
@@ -38,6 +40,36 @@ SO3_GEOMETRY = SO(3)
 XLABEL = r"$\log_{10}(h)$"
 YLABEL_FORWARD = r"$\log_{10}(\mathcal{E}(h))$"
 YLABEL_BACKWARD = r"$\log_{10}(\overleftarrow{\mathcal{E}}(h))$"
+
+
+class LinearSpaceTimeControl(diffrax.AbstractPath):
+    control: diffrax.AbstractPath
+
+    @property
+    def t0(self):
+        return self.control.t0
+
+    @property
+    def t1(self):
+        return self.control.t1
+
+    def evaluate(
+        self,
+        t0: RealScalarLike,
+        t1: RealScalarLike | None = None,
+        left: bool = True,
+        *,
+        use_levy: bool = False,
+    ):
+        if t1 is None:
+            return self.control.evaluate(t0, left=left)
+
+        w = self.control.evaluate(t0, t1, left=left)
+        if not use_levy:
+            return w
+
+        h = jax.tree_util.tree_map(jnp.zeros_like, w)
+        return diffrax.SpaceTimeLevyArea(dt=t1 - t0, W=w, H=h)
 
 
 def so3_coeffs_matrix(t: RealScalarLike, x: Array, args: Args) -> Array:
@@ -80,9 +112,14 @@ def make_matrix_method_runner(
     geometry,
     coeffs_matrix_fn: Callable[[RealScalarLike, Array, Args], Array],
     y0_default: np.ndarray,
+    use_space_time_levy: bool = False,
+    use_reversible_adjoint: bool = True,
 ) -> Callable[..., np.ndarray]:
     stepsize_controller = diffrax.ConstantStepSize()
-    adjoint = ReversibleAdjoint()
+    adjoint = ReversibleAdjoint() if use_reversible_adjoint else None
+    frame_shape = coeffs_matrix_fn(
+        T0, jnp.asarray(y0_default, dtype=jnp.float64), None
+    ).shape[:-1]
 
     @lru_cache(maxsize=None)
     def _compiled_runner(num_points: int):
@@ -96,13 +133,21 @@ def make_matrix_method_runner(
         @jax.jit
         def _run(x: jax.Array, y0: jax.Array) -> jax.Array:
             control = diffrax.LinearInterpolation(ts=ts, ys=x)
-            term = GeometricTerm(
-                geometry=geometry,
-                coeffs_prod=lambda t, y, args, dW: coeffs_matrix_fn(t, y, args) @ dW,
-                control_fn=lambda t0, t1, **kwargs: control.evaluate(
-                    t0, t1, **kwargs
+            if use_space_time_levy:
+                control = LinearSpaceTimeControl(control)
+            term = diffrax.MultiTerm(
+                GeometricTerm(
+                    lambda t, y, args: jnp.zeros(frame_shape, dtype=y.dtype),
+                    geometry=geometry,
+                ),
+                diffrax.ControlTerm(
+                    lambda t, y, args: coeffs_matrix_fn(t, y, args),
+                    control,
                 ),
             )
+            solve_kwargs = {}
+            if adjoint is not None:
+                solve_kwargs["adjoint"] = adjoint
             solution = diffrax.diffeqsolve(
                 term,
                 solver,
@@ -113,8 +158,8 @@ def make_matrix_method_runner(
                 saveat=saveat,
                 stepsize_controller=stepsize_controller,
                 max_steps=num_points + 4,
-                adjoint=adjoint,
                 throw=True,
+                **solve_kwargs,
             )
             assert solution.ys is not None
             return solution.ys
@@ -138,6 +183,17 @@ def make_so3_method_runner(solver) -> Callable[..., np.ndarray]:
         geometry=SO3_GEOMETRY,
         coeffs_matrix_fn=so3_coeffs_matrix,
         y0_default=np.asarray(SO3_X0, dtype=np.float64),
+    )
+
+
+def make_so3_srkmk_method_runner(solver) -> Callable[..., np.ndarray]:
+    return make_matrix_method_runner(
+        solver,
+        geometry=SO3_GEOMETRY,
+        coeffs_matrix_fn=so3_coeffs_matrix,
+        y0_default=np.asarray(SO3_X0, dtype=np.float64),
+        use_space_time_levy=True,
+        use_reversible_adjoint=False,
     )
 
 
@@ -215,7 +271,9 @@ def expected_rates(
     solver,
     hurst: float,
 ) -> tuple[float, float]:
-    _get = lambda name: getattr(solver, name, lambda _: None)(None)
+    def _get(name: str):
+        return getattr(solver, name, lambda _: None)(None)
+
     order = _get("order")
     antisymmetric_order = _get("antisymmetric_order")
     if antisymmetric_order is None:

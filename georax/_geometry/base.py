@@ -45,7 +45,8 @@ class Manifold(eqx.Module):
         """
         if self.chart is not None:
             return self.chart.apply(x, a, self)
-        raise TypeError(f"{type(self).__name__} does not define a chart.")
+        chart = self.select_chart(12)
+        return chart.apply(x, a, self)
 
     @abstractmethod
     def select_chart(self, required_order: RealScalarLike) -> LocalChart:

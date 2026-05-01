@@ -6,13 +6,19 @@ from typing import ClassVar, override
 
 import jax.numpy as jnp
 import numpy as np
-from diffrax import RESULTS, AbstractSolver, AbstractTerm, LocalLinearInterpolation
+from diffrax import (
+    RESULTS,
+    AbstractSolver,
+    AbstractTerm,
+    LocalLinearInterpolation,
+    MultiTerm,
+)
 from diffrax._custom_types import VF, Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
 from diffrax._term import WrapTerm
 from diffrax_lowstorage import LowStorageRecurrence
 from jaxtyping import Array
 
-from georax._term import GeometricTerm
+from georax._term import GeometricTerm, select_chart_for_solver
 
 
 @dataclass(frozen=True)
@@ -60,7 +66,7 @@ class CommutatorFreeTableau:
 
 
 class AbstractCommutatorFreeSolver(AbstractSolver):
-    term_structure: ClassVar[type[GeometricTerm]] = GeometricTerm
+    term_structure: ClassVar[type[AbstractTerm]] = AbstractTerm
     interpolation_cls: ClassVar[Callable[..., LocalLinearInterpolation]] = (
         LocalLinearInterpolation
     )
@@ -69,35 +75,20 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
     @override
     def init(
         self,
-        terms: GeometricTerm,
+        terms: AbstractTerm,
         t0: RealScalarLike,
         t1: RealScalarLike,
         y0: Y,
         args: Args,
     ) -> None:
         del t0, t1, y0, args
-        geometric_term = self._unwrap_geometric_term(terms)
-        required_order = self.error_order(geometric_term)
-        if hasattr(self, "antisymmetric_order"):
-            antisym_order = self.antisymmetric_order(geometric_term)
-            if required_order is None:
-                required_order = antisym_order
-            else:
-                required_order = max(int(required_order), antisym_order)
-        if required_order is None:
-            required_order = self.order(geometric_term)
-        if required_order is None:
-            raise ValueError(
-                f"Got required_order of type {type(required_order)} for solver {self}, expected {RealScalarLike}"
-            )
-        geometric_term.geometry.select_chart(required_order)
-        del terms, geometric_term
+        select_chart_for_solver(self, self._unwrap_geometric_term(terms))
         return None
 
     @override
     def func(
         self,
-        terms: GeometricTerm,
+        terms: AbstractTerm,
         t0: RealScalarLike,
         y0: Y,
         args: Args,
@@ -106,12 +97,18 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
 
     @staticmethod
     def _unwrap_geometric_term(terms: AbstractTerm) -> GeometricTerm:
-        base_term = terms
-        while isinstance(base_term, WrapTerm):
-            base_term = base_term.term
-        if not isinstance(base_term, GeometricTerm):
+        while isinstance(terms, WrapTerm):
+            terms = terms.term
+        if isinstance(terms, MultiTerm):
+            for t in terms.terms:
+                while isinstance(t, WrapTerm):
+                    t = t.term
+                if isinstance(t, GeometricTerm):
+                    terms = t
+                    break
+        if not isinstance(terms, GeometricTerm):
             raise TypeError("Commutator-free solvers require a GeometricTerm.")
-        return base_term
+        return terms
 
     def _apply_exp_product(
         self,
@@ -131,7 +128,7 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
     @override
     def step(
         self,
-        terms: GeometricTerm,
+        terms: AbstractTerm,
         t0: RealScalarLike,
         t1: RealScalarLike,
         y0: Y,
@@ -144,28 +141,23 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
         dt = t1 - t0
         control = terms.contr(t0, t1)
         geometric_term = self._unwrap_geometric_term(terms)
-        y0_array = y0
+        if geometric_term.geometry.chart is None:
+            select_chart_for_solver(self, geometric_term)
         stages: list[Array] = []
 
         for c_i, exp_rows in zip(self.tableau.c, self.tableau.stage_exps, strict=True):
-            if len(exp_rows) == 0:
-                y_stage = y0_array
-            else:
-                y_stage = self._apply_exp_product(
-                    y0_array, exp_rows, stages, geometric_term
-                )
-
+            y_stage = self._apply_exp_product(y0, exp_rows, stages, geometric_term)
             t_stage = t1 if c_i == 1.0 else t0 + c_i * dt
-            stages.append(geometric_term.coeffs_prod(t_stage, y_stage, args, control))
+            stages.append(terms.prod(terms.vf(t_stage, y_stage, args), control))
 
         y1 = self._apply_exp_product(
-            y0_array, self.tableau.final_exps, stages, geometric_term
+            y0, self.tableau.final_exps, stages, geometric_term
         )
 
         y_error = None
         if self.tableau.embedded_final_exps is not None:
             y_hat = self._apply_exp_product(
-                y0_array,
+                y0,
                 self.tableau.embedded_final_exps,
                 stages,
                 geometric_term,
@@ -182,18 +174,20 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
     recurrence: ClassVar[LowStorageRecurrence]
     embedded_penultimate_exps: ClassVar[tuple[np.ndarray, ...] | None] = None
 
+    @property
+    def _tracks_penultimate(self) -> bool:
+        return (
+            self.recurrence.penultimate_stage_error
+            or self.embedded_penultimate_exps is not None
+        )
+
     def error_order(self, terms: GeometricTerm) -> int | None:
-        if (
-            not self.recurrence.penultimate_stage_error
-            and self.embedded_penultimate_exps is None
-        ):
-            return None
-        return self.order(terms)
+        return self.order(terms) if self._tracks_penultimate else None
 
     @override
     def step(
         self,
-        terms: GeometricTerm,
+        terms: AbstractTerm,
         t0: RealScalarLike,
         t1: RealScalarLike,
         y0: Y,
@@ -210,17 +204,16 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
         dt = t1 - t0
         control = terms.contr(t0, t1)
         geometric_term = self._unwrap_geometric_term(terms)
-        y0_array = y0
-        stages: list[Array] | None = (
-            [] if self.embedded_penultimate_exps is not None else None
-        )
+        if geometric_term.geometry.chart is None:
+            select_chart_for_solver(self, geometric_term)
+        stages: list[Array] = []
+        last_stage = self.recurrence.num_stages - 1
 
         t_stage0 = t1 if self.recurrence.C[0] == 1.0 else t0 + c[0] * dt
-        tmp = geometric_term.coeffs_prod(t_stage0, y0_array, args, control)
-        if stages is not None:
-            stages.append(tmp)
+        tmp = terms.prod(terms.vf(t_stage0, y0, args), control)
+        stages.append(tmp)
         y1 = geometric_term.apply_increment(
-            y0_array, jnp.asarray(b[0], dtype=tmp.dtype) * tmp
+            y0, jnp.asarray(b[0], dtype=tmp.dtype) * tmp
         )
 
         y_penultimate = None
@@ -230,17 +223,10 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
                 if self.recurrence.C[stage_index] == 1.0
                 else t0 + c[stage_index] * dt
             )
-            coeffs = geometric_term.coeffs_prod(t_stage, y1, args, control)
-            if stages is not None:
-                stages.append(coeffs)
+            coeffs = terms.prod(terms.vf(t_stage, y1, args), control)
+            stages.append(coeffs)
             tmp = jnp.asarray(a[stage_index - 1], dtype=tmp.dtype) * tmp + coeffs
-            if (
-                (
-                    self.recurrence.penultimate_stage_error
-                    or self.embedded_penultimate_exps is not None
-                )
-                and stage_index == self.recurrence.num_stages - 1
-            ):
+            if self._tracks_penultimate and stage_index == last_stage:
                 y_penultimate = y1
             y1 = geometric_term.apply_increment(
                 y1, jnp.asarray(b[stage_index], dtype=tmp.dtype) * tmp
@@ -250,7 +236,7 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
         # difference may be preferable for manifold error control later.
         y_error = None
         if self.embedded_penultimate_exps is not None:
-            assert y_penultimate is not None and stages is not None, (
+            assert y_penultimate is not None, (
                 "Embedded penultimate exponentials require at least two stages."
             )
             y_hat = self._apply_exp_product(

@@ -8,7 +8,7 @@ import diffrax
 import jax
 import jax.numpy as jnp
 import pytest
-from conftest import BENCH_CASES, BENCH_SOLVERS, BenchCase
+from conftest import BENCH_CASES, BenchCase, bench_solvers_for_case
 from jaxtyping import PyTree
 
 from georax import GeometricTerm
@@ -205,7 +205,7 @@ def _print_table(
 @pytest.mark.parametrize("case", BENCH_CASES, ids=[c.name for c in BENCH_CASES])
 def test_solvers_compiled_memory(case: BenchCase) -> None:
     results: list[tuple[str, int]] = []
-    for solver_name, solver_cls in BENCH_SOLVERS:
+    for solver_name, solver_cls in bench_solvers_for_case(case):
         total = _compiled_memory_bytes(solver_cls, case.y0, case.term, case.args)
         results.append((solver_name, total))
 
@@ -232,11 +232,11 @@ def test_solvers_compiled_reverse_mode_memory_by_adjoint(
 ) -> None:
     max_steps = BENCH_NUM_STEPS * 2
 
-    solvers = BENCH_SOLVERS
+    solvers = bench_solvers_for_case(case)
     if isinstance(adjoint, diffrax.ReversibleAdjoint):
         solvers = [
             (name, cls)
-            for name, cls in BENCH_SOLVERS
+            for name, cls in solvers
             if issubclass(cls, diffrax.AbstractReversibleSolver)
         ]
         if not solvers:
@@ -271,7 +271,7 @@ def test_solvers_compiled_reverse_mode_memory_by_adjoint(
 @pytest.mark.parametrize("case", BENCH_CASES, ids=[c.name for c in BENCH_CASES])
 def test_solvers_runtime(case: BenchCase) -> None:
     results: list[tuple[str, float]] = []
-    for solver_name, solver_cls in BENCH_SOLVERS:
+    for solver_name, solver_cls in bench_solvers_for_case(case):
         t = _runtime_seconds(
             solver_cls,
             case.y0,
@@ -294,7 +294,7 @@ def test_solvers_runtime(case: BenchCase) -> None:
 @pytest.mark.parametrize("case", BENCH_CASES, ids=[c.name for c in BENCH_CASES])
 def test_solvers_grad_runtime(case: BenchCase) -> None:
     results: list[tuple[str, float]] = []
-    for solver_name, solver_cls in BENCH_SOLVERS:
+    for solver_name, solver_cls in bench_solvers_for_case(case):
         t = _grad_runtime_seconds(
             solver_cls,
             case.y0,
