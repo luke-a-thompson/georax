@@ -5,7 +5,7 @@ from typing import override
 import equinox as eqx
 import jax.numpy as jnp
 import numpy as np
-from diffrax import RESULTS
+from diffrax import RESULTS, AbstractTerm
 from diffrax._custom_types import VF, Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
 from diffrax._local_interpolation import LocalLinearInterpolation
 from diffrax._solver.base import AbstractSolver, AbstractWrappedSolver
@@ -65,7 +65,14 @@ class RKMK(AbstractWrappedSolver):
         y0: Y,
         args: Args,
     ) -> None:
-        del terms, t0, t1, y0, args
+        del t0, t1, y0, args
+        geometric_term = self._unwrap_geometric_term(terms)
+        required_order = self.order(geometric_term)
+        if required_order is None:
+            raise ValueError(
+                f"Got required_order of type {type(required_order)} for solver {self}, expected {RealScalarLike}"
+            )
+        geometric_term.geometry.select_chart(required_order)
         return None
 
     @override
@@ -77,6 +84,15 @@ class RKMK(AbstractWrappedSolver):
         args: Args,
     ) -> VF:
         return terms.vf(t0, y0, args)
+
+    @staticmethod
+    def _unwrap_geometric_term(terms: AbstractTerm) -> GeometricTerm:
+        base_term = terms
+        while isinstance(base_term, WrapTerm):
+            base_term = base_term.term
+        if not isinstance(base_term, GeometricTerm):
+            raise TypeError("RKMK requires a GeometricTerm.")
+        return base_term
 
     @override
     def step(
@@ -91,10 +107,7 @@ class RKMK(AbstractWrappedSolver):
     ) -> tuple[Y, Y | None, DenseInfo, None, RESULTS]:
         del solver_state, made_jump
 
-        while isinstance(terms, WrapTerm):
-            terms = terms.term
-        if not isinstance(terms, GeometricTerm):
-            raise TypeError("RKMK requires a GeometricTerm.")
+        terms = self._unwrap_geometric_term(terms)
         chart = terms.geometry.chart
         if chart is None:
             raise TypeError("RKMK requires a GeometricTerm geometry with a chart.")

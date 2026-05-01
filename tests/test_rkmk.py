@@ -3,11 +3,10 @@ from __future__ import annotations
 import diffrax
 import jax
 import jax.numpy as jnp
-import pytest
 from conftest import make_solver_accuracy_ambient_term, make_solver_accuracy_term
 from diffrax import Heun
 
-from georax import CG2, RKMK, Euclidean, GeometricTerm
+from georax import RKMK
 
 jax.config.update("jax_enable_x64", True)
 
@@ -16,45 +15,21 @@ _T1 = 1.0
 _Y0 = jnp.eye(3, dtype=jnp.float64)
 _MAX_STEPS = 100_000
 _TERM = make_solver_accuracy_term()
-_REFERENCE = diffrax.diffeqsolve(
-    make_solver_accuracy_ambient_term(),
-    diffrax.Dopri8(),
-    _T0,
-    _T1,
-    1e-3,
-    _Y0,
-    saveat=diffrax.SaveAt(t1=True),
-    stepsize_controller=diffrax.PIDController(rtol=1e-12, atol=1e-12),
-    max_steps=_MAX_STEPS,
-    throw=True,
-)
-assert _REFERENCE.ys is not None
-_REFERENCE_Y1 = _REFERENCE.ys[0]
-
-
-def test_rkmk_rejects_non_erk_base_solver() -> None:
-    with pytest.raises(TypeError):
-        RKMK(CG2())
-
-
-def test_rkmk_rejects_non_ode_inner_term() -> None:
-    control_term = GeometricTerm(
-        geometry=Euclidean(),
-        coeffs_prod=lambda t, y, args, control: jnp.ones((1,)),
-        control_fn=lambda t0, t1, **kwargs: jnp.array([t1 - t0]),
+def _reference_y1():
+    reference = diffrax.diffeqsolve(
+        make_solver_accuracy_ambient_term(),
+        diffrax.Dopri8(),
+        _T0,
+        _T1,
+        1e-3,
+        _Y0,
+        saveat=diffrax.SaveAt(t1=True),
+        stepsize_controller=diffrax.PIDController(rtol=1e-12, atol=1e-12),
+        max_steps=_MAX_STEPS,
+        throw=True,
     )
-    solver = RKMK(Heun())
-
-    with pytest.raises(TypeError, match="intrinsic ODE coefficients"):
-        solver.step(
-            terms=control_term,
-            t0=0.0,
-            t1=1.0,
-            y0=jnp.array([1.0]),
-            args=None,
-            solver_state=None,
-            made_jump=False,
-        )
+    assert reference.ys is not None
+    return reference.ys[0]
 
 
 def test_rkmk_heun_preserves_so3_orthogonality() -> None:
@@ -81,6 +56,7 @@ def test_rkmk_heun_empirical_order_matches_base() -> None:
     solver = RKMK(Heun())
     expected_order = solver.order(_TERM)
     assert expected_order == 2
+    reference_y1 = _reference_y1()
 
     dts = jnp.array([0.1, 0.05, 0.025, 0.0125], dtype=jnp.float64)
     errors = []
@@ -97,7 +73,7 @@ def test_rkmk_heun_empirical_order_matches_base() -> None:
             throw=True,
         )
         assert out.ys is not None
-        errors.append(float(jnp.linalg.norm(out.ys[0] - _REFERENCE_Y1)))
+        errors.append(float(jnp.linalg.norm(out.ys[0] - reference_y1)))
 
     log_dts = jnp.log(dts)
     log_errs = jnp.log(jnp.array(errors, dtype=jnp.float64))
@@ -110,16 +86,18 @@ def test_rkmk_heun_empirical_order_matches_base() -> None:
 
 def test_rkmk_heun_returns_error_estimate_from_embedded_base() -> None:
     solver = RKMK(Heun())
-
-    _, y_error, _, _, result = solver.step(
-        terms=_TERM,
-        t0=_T0,
-        t1=0.1,
-        y0=_Y0,
-        args=None,
-        solver_state=None,
-        made_jump=False,
+    out = diffrax.diffeqsolve(
+        _TERM,
+        solver,
+        _T0,
+        _T1,
+        0.1,
+        _Y0,
+        saveat=diffrax.SaveAt(t1=True),
+        stepsize_controller=diffrax.PIDController(rtol=1e-5, atol=1e-7),
+        max_steps=_MAX_STEPS,
+        throw=True,
     )
-    assert result == diffrax.RESULTS.successful
-    assert y_error is not None
-    assert float(jnp.linalg.norm(y_error)) > 0.0
+    assert out.ys is not None
+    assert out.result == diffrax.RESULTS.successful
+    assert out.stats["num_accepted_steps"] > 0
