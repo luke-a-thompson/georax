@@ -7,8 +7,8 @@ from .base import LocalChart, Manifold, chart_order
 
 
 class EuclideanChart(LocalChart):
-    order: chart_order = "exact"
-    inverse_order: chart_order = "exact"
+    order: RealScalarLike = 12
+    inverse_order: RealScalarLike = 12
 
     def apply(self, x: Array, a: Array, geometry: Euclidean) -> Array:
         return x + a
@@ -22,9 +22,6 @@ class EuclideanChart(LocalChart):
 
 class Euclidean(Manifold):
     """R^n with the standard frame, addition retraction, and exact chart."""
-
-    def __init__(self, *, chart: LocalChart | None = None):
-        object.__setattr__(self, "chart", EuclideanChart() if chart is None else chart)
 
     def select_chart(self, required_order: RealScalarLike) -> LocalChart:
         del required_order

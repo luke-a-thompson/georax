@@ -11,8 +11,8 @@ chart_order = int | Literal["exact"]
 
 
 class LocalChart(eqx.Module):
-    order: chart_order
-    inverse_order: chart_order
+    order: RealScalarLike
+    inverse_order: RealScalarLike
 
     @abstractmethod
     def apply(self, x: Array, a: Array, geometry: "Manifold") -> Array:

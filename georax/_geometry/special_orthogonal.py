@@ -8,8 +8,8 @@ import numpy as np
 from diffrax._custom_types import RealScalarLike
 from jaxtyping import Array
 
+from ._charts import CayleyChart, QRTaylorChart
 from .base import LocalChart, Manifold
-from ._charts import CayleyChart, ExpChart, PadeChart, RodriguesChart
 
 __all__ = ["SO"]
 
@@ -22,7 +22,7 @@ class SO(Manifold):
     _upper_j: Array
     _basis: Array
 
-    def __init__(self, n: int, *, chart: LocalChart | None = None):
+    def __init__(self, n: int):
         n = int(n)
         if n < 2:
             raise ValueError("SO(n) requires n >= 2.")
@@ -38,7 +38,6 @@ class SO(Manifold):
         object.__setattr__(self, "_upper_i", jnp.asarray(upper_i))
         object.__setattr__(self, "_upper_j", jnp.asarray(upper_j))
         object.__setattr__(self, "_basis", jnp.asarray(basis))
-        object.__setattr__(self, "chart", CayleyChart() if chart is None else chart)
 
     @property
     def lie_algebra_dimension(self) -> int:
@@ -57,14 +56,10 @@ class SO(Manifold):
 
     @override
     def select_chart(self, required_order: RealScalarLike) -> LocalChart:
-        if required_order == "exact":
-            chart: LocalChart = RodriguesChart() if self.n == 3 else ExpChart()
-        elif required_order <= 2:
+        if required_order <= 2:
             chart = CayleyChart()
-        elif self.n == 3:
-            chart = RodriguesChart()
         else:
-            chart = PadeChart(int(required_order))
+            chart = QRTaylorChart(int(required_order))
 
         object.__setattr__(self, "chart", chart)
         return chart

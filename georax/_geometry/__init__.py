@@ -1,11 +1,8 @@
 from .base import LocalChart, Manifold
 from ._charts import (
     CayleyChart,
-    CongruenceExpChart,
     CongruenceTaylorChart,
-    ExpChart,
-    PadeChart,
-    RodriguesChart,
+    QRTaylorChart,
 )
 from .euclidean import Euclidean
 from .spd import SPD
@@ -15,11 +12,8 @@ __all__ = [
     "Manifold",
     "LocalChart",
     "CayleyChart",
-    "CongruenceExpChart",
     "CongruenceTaylorChart",
-    "ExpChart",
-    "PadeChart",
-    "RodriguesChart",
+    "QRTaylorChart",
     "Euclidean",
     "SO",
     "SPD",

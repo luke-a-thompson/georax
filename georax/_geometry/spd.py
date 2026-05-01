@@ -3,17 +3,16 @@ from __future__ import annotations
 from typing import override
 
 import equinox as eqx
-from diffrax._custom_types import RealScalarLike
 import jax.numpy as jnp
 import numpy as np
+from diffrax._custom_types import RealScalarLike
 from jaxtyping import Array
 
-from .base import LocalChart, Manifold
 from ._charts import (
-    CongruenceExpChart,
     CongruenceTaylorChart,
     _sym,
 )
+from .base import LocalChart, Manifold
 
 __all__ = ["SPD"]
 
@@ -37,7 +36,7 @@ class SPD(Manifold):
     _upper_j: Array
     _basis: Array
 
-    def __init__(self, n: int, *, chart: LocalChart | None = None):
+    def __init__(self, n: int):
         n = int(n)
         if n < 1:
             raise ValueError("SPD(n) requires n >= 1.")
@@ -59,9 +58,6 @@ class SPD(Manifold):
         object.__setattr__(self, "_upper_i", jnp.asarray(upper_i))
         object.__setattr__(self, "_upper_j", jnp.asarray(upper_j))
         object.__setattr__(self, "_basis", jnp.asarray(basis))
-        object.__setattr__(
-            self, "chart", CongruenceExpChart() if chart is None else chart
-        )
 
     @property
     def dimension(self) -> int:
@@ -87,9 +83,6 @@ class SPD(Manifold):
 
     @override
     def select_chart(self, required_order: RealScalarLike) -> LocalChart:
-        if required_order == "exact":
-            chart: LocalChart = CongruenceExpChart()
-        else:
-            chart = CongruenceTaylorChart(int(required_order))
+        chart = CongruenceTaylorChart(int(required_order))
         object.__setattr__(self, "chart", chart)
         return chart
