@@ -8,5 +8,6 @@ from .commutator_free import (
 from .commutator_free import (
     AbstractLowStorageCommutatorFreeSolver as AbstractLowStorageCommutatorFreeSolver,
 )
+from .euler import GeometricEuler as GeometricEuler
 from .rkmk import RKMK as RKMK
 from .srkmk import SRKMK as SRKMK
