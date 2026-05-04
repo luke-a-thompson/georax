@@ -4,46 +4,61 @@ from typing import override
 
 import equinox as eqx
 import jax.numpy as jnp
-import numpy as np
 from diffrax import RESULTS, AbstractTerm
 from diffrax._custom_types import VF, Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
 from diffrax._local_interpolation import LocalLinearInterpolation
 from diffrax._solver.base import AbstractSolver, AbstractWrappedSolver
-from diffrax._solver.runge_kutta import AbstractERK, ButcherTableau
-from diffrax._term import WrapTerm
+from diffrax._solver.runge_kutta import AbstractERK
 from jaxtyping import Array
 
-from georax._term import GeometricTerm, select_chart_for_solver
+from georax._term import GeometricTerm, find_geometric_term, select_chart_for_solver
 
 
-def _combine(weights: np.ndarray, values: list[Array]) -> Array:
-    out = jnp.zeros_like(values[0])
-    for weight, value in zip(weights, values, strict=True):
-        out = out + jnp.asarray(weight, dtype=value.dtype) * value
-    return out
+class _PulledTerm(AbstractTerm[Array, RealScalarLike]):
+    """Lie-algebra pullback of a manifold drift term anchored at ``y_anchor``."""
+
+    drift_term: GeometricTerm
+    y_anchor: Y
+
+    @override
+    def vf(self, t: RealScalarLike, omega: Array, args: Args) -> Array:
+        geometry = self.drift_term.geometry
+        chart = geometry.chart
+        if chart is None:
+            raise TypeError("RKMK requires a geometry with a selected chart.")
+        y = self.drift_term.apply_increment(self.y_anchor, omega)
+        raw = self.drift_term.vf(t, y, args)
+        return chart.inverse_differential(self.y_anchor, omega, raw, geometry)
+
+    @override
+    def contr(self, t0: RealScalarLike, t1: RealScalarLike, **kwargs) -> RealScalarLike:
+        del kwargs
+        return t1 - t0
+
+    @override
+    def prod(self, vf: Array, control: RealScalarLike) -> Array:
+        return vf * control
 
 
 class RKMK(AbstractWrappedSolver):
+    """RKMK lift of a Diffrax explicit Runge-Kutta solver.
+
+    The drift vector field is pulled back to the Lie algebra of the geometry's
+    selected chart and integrated by the wrapped ERK starting from ``omega = 0``.
+    The resulting algebra increment is retracted onto the manifold once.
+    """
+
     solver: AbstractSolver = eqx.field(static=True)
-    tableau: ButcherTableau = eqx.field(static=True)
-    uses_k_dense_info: bool = eqx.field(static=True)
-    has_error_estimate: bool = eqx.field(static=True)
 
     def __init__(self, solver: AbstractSolver):
         if not isinstance(solver, AbstractERK):
             raise TypeError("RKMK requires a base explicit Runge-Kutta solver.")
+        # FSAL caches the previous step's last stage as f0 of the next, but
+        # our y_anchor changes between RKMK steps so any cached value would be
+        # stale. Disable FSAL on the wrapped solver to force a fresh first
+        # stage every step.
+        solver = eqx.tree_at(lambda s: s.disable_fsal, solver, True)
         object.__setattr__(self, "solver", solver)
-        object.__setattr__(self, "tableau", solver.tableau)
-        object.__setattr__(
-            self,
-            "uses_k_dense_info",
-            self.interpolation_cls is not LocalLinearInterpolation,
-        )
-        object.__setattr__(
-            self,
-            "has_error_estimate",
-            not np.allclose(np.asarray(solver.tableau.b_error), 0.0),
-        )
 
     @property
     def term_structure(self):  # pyright: ignore
@@ -51,7 +66,9 @@ class RKMK(AbstractWrappedSolver):
 
     @property
     def interpolation_cls(self):  # pyright: ignore
-        return self.solver.interpolation_cls
+        # Stages live in the algebra; do not inherit Euclidean Hermite
+        # interpolation from the wrapped solver.
+        return LocalLinearInterpolation
 
     def order(self, terms) -> int | None:
         return self.solver.order(terms)
@@ -66,7 +83,7 @@ class RKMK(AbstractWrappedSolver):
         args: Args,
     ) -> None:
         del t0, t1, y0, args
-        select_chart_for_solver(self, self._unwrap_geometric_term(terms))
+        select_chart_for_solver(self, find_geometric_term(terms))
         return None
 
     @override
@@ -79,15 +96,6 @@ class RKMK(AbstractWrappedSolver):
     ) -> VF:
         return terms.vf(t0, y0, args)
 
-    @staticmethod
-    def _unwrap_geometric_term(terms: AbstractTerm) -> GeometricTerm:
-        base_term = terms
-        while isinstance(base_term, WrapTerm):
-            base_term = base_term.term
-        if not isinstance(base_term, GeometricTerm):
-            raise TypeError("RKMK requires a GeometricTerm.")
-        return base_term
-
     @override
     def step(
         self,
@@ -99,46 +107,23 @@ class RKMK(AbstractWrappedSolver):
         solver_state: None,
         made_jump: BoolScalarLike,
     ) -> tuple[Y, Y | None, DenseInfo, None, RESULTS]:
-        del solver_state, made_jump
+        del solver_state
 
-        terms = self._unwrap_geometric_term(terms)
-        chart = terms.geometry.chart
-        if chart is None:
+        drift_term = find_geometric_term(terms)
+        if drift_term.geometry.chart is None:
             raise TypeError("RKMK requires a GeometricTerm geometry with a chart.")
 
-        control = jnp.asarray(terms.contr(t0, t1))
-        dt = t1 - t0
-        stage_algebras: list[Array] = []
-        ks: list[Array] = []
+        algebra_term = _PulledTerm(drift_term, y0)
+        omega0 = jnp.zeros_like(drift_term.vf(t0, y0, args))
 
-        for i in range(self.tableau.num_stages):
-            if i == 0:
-                omega = None
-                y_stage = y0
-                t_stage = t0
-            else:
-                omega = control * _combine(self.tableau.a_lower[i - 1], stage_algebras)
-                y_stage = terms.apply_increment(y0, omega)
-                c_i = self.tableau.c[i - 1]
-                t_stage = t1 if c_i == 1.0 else t0 + c_i * dt
-
-            alg_stage = terms.coeffs(t_stage, y_stage, args)
-            if omega is None:
-                omega = jnp.zeros_like(alg_stage)
-            stage_algebras.append(
-                chart.inverse_differential(y0, omega, alg_stage, terms.geometry)
-            )
-            ks.append(jnp.zeros_like(y_stage))
-
-        omega_sol = control * _combine(self.tableau.b_sol, stage_algebras)
-        y1 = terms.apply_increment(y0, omega_sol)
+        omega1, omega_error, _, _, result = self.solver.step(
+            algebra_term, t0, t1, omega0, args, None, made_jump,
+        )
+        y1 = drift_term.apply_increment(y0, omega1)
 
         y_error = None
-        if self.has_error_estimate:
-            omega_error = control * _combine(self.tableau.b_error, stage_algebras)
-            y_error = terms.apply_increment(y0, omega_error) - y0
+        if omega_error is not None:
+            y_error = drift_term.apply_increment(y0, omega_error) - y0
 
         dense_info = dict(y0=y0, y1=y1)
-        if self.uses_k_dense_info:
-            dense_info["k"] = jnp.stack(ks)
-        return y1, y_error, dense_info, None, RESULTS.successful
+        return y1, y_error, dense_info, None, result

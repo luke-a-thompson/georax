@@ -14,10 +14,9 @@ from diffrax._solver.srk import (
     GeneralCoeffs,
     StochasticButcherTableau,
 )
-from diffrax._term import WrapTerm
 from jaxtyping import Array
 
-from georax._term import GeometricTerm, select_chart_for_solver
+from georax._term import GeometricTerm, select_chart_for_solver, unwrap_term
 
 
 class _PulledDriftTerm(AbstractTerm[Array, RealScalarLike]):
@@ -34,7 +33,7 @@ class _PulledDriftTerm(AbstractTerm[Array, RealScalarLike]):
             raise TypeError("SRKMK requires a geometry with a selected chart.")
 
         y = self.drift_term.apply_increment(self.y_anchor, omega)
-        raw = self.drift_term.coeffs(t, y, args)
+        raw = self.drift_term.vf(t, y, args)
         return chart.inverse_differential(self.y_anchor, omega, raw, geometry)
 
     @override
@@ -175,20 +174,14 @@ class SRKMK(AbstractWrappedSolver):
         return self.solver.strong_order(terms)
 
     @staticmethod
-    def _unwrap_term(term: AbstractTerm) -> AbstractTerm:
-        while isinstance(term, WrapTerm):
-            term = term.term
-        return term
-
-    @staticmethod
     def _split_terms(terms) -> tuple[GeometricTerm, AbstractTerm]:
-        terms = SRKMK._unwrap_term(terms)
+        terms = unwrap_term(terms)
         if not isinstance(terms, MultiTerm) or len(terms.terms) != 2:
             raise TypeError(
                 "SRKMK expects terms = MultiTerm(drift_term, diffusion_term)."
             )
         drift_term, diffusion_term = terms.terms
-        drift_term = SRKMK._unwrap_term(drift_term)
+        drift_term = unwrap_term(drift_term)
         if not isinstance(drift_term, GeometricTerm):
             raise TypeError("SRKMK requires a geometric drift term.")
         return drift_term, diffusion_term
@@ -202,8 +195,7 @@ class SRKMK(AbstractWrappedSolver):
         y0: Y,
         args: Args,
     ) -> None:
-        del t0, t1, y0, args
-        drift_term, _ = self._split_terms(terms)
+        drift_term, diffusion_term = self._split_terms(terms)
 
         if self.is_additive and not self.additive_after_pullback:
             raise TypeError(
@@ -217,6 +209,18 @@ class SRKMK(AbstractWrappedSolver):
         # charts this should be conservative enough to satisfy the SRKMK
         # truncation condition for the wrapped method.
         select_chart_for_solver(self, drift_term)
+
+        # Defer to the wrapped SRK's init for any trace-time validation. For
+        # additive tableaus this performs a JVP check that the (pulled-back)
+        # diffusion is independent of the algebra state — i.e. it catches a
+        # false ``additive_after_pullback=True`` claim. For general tableaus
+        # AbstractSRK.init is a no-op.
+        omega0 = jnp.zeros_like(drift_term.vf(t0, y0, args))
+        algebra_terms = MultiTerm(
+            _PulledDriftTerm(drift_term, y0),
+            _PulledDiffusionTerm(drift_term, diffusion_term, y0, omega0),
+        )
+        self.solver.init(algebra_terms, t0, t1, omega0, args)
         return None
 
     @override
@@ -248,8 +252,7 @@ class SRKMK(AbstractWrappedSolver):
         if chart is None:
             raise TypeError("SRKMK requires a geometry with a selected chart.")
 
-        drift_zero = drift_term.coeffs(t0, y0, args)
-        omega0 = jnp.zeros_like(drift_zero)
+        omega0 = jnp.zeros_like(drift_term.vf(t0, y0, args))
         algebra_terms = MultiTerm(
             _PulledDriftTerm(drift_term, y0),
             _PulledDiffusionTerm(drift_term, diffusion_term, y0, omega0),

@@ -11,14 +11,12 @@ from diffrax import (
     AbstractSolver,
     AbstractTerm,
     LocalLinearInterpolation,
-    MultiTerm,
 )
 from diffrax._custom_types import VF, Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
-from diffrax._term import WrapTerm
 from diffrax_lowstorage import LowStorageRecurrence
 from jaxtyping import Array
 
-from georax._term import GeometricTerm, select_chart_for_solver
+from georax._term import GeometricTerm, find_geometric_term, select_chart_for_solver
 
 
 @dataclass(frozen=True)
@@ -82,7 +80,7 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
         args: Args,
     ) -> None:
         del t0, t1, y0, args
-        select_chart_for_solver(self, self._unwrap_geometric_term(terms))
+        select_chart_for_solver(self, find_geometric_term(terms))
         return None
 
     @override
@@ -94,21 +92,6 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
         args: Args,
     ) -> VF:
         return terms.vf(t0, y0, args)
-
-    @staticmethod
-    def _unwrap_geometric_term(terms: AbstractTerm) -> GeometricTerm:
-        while isinstance(terms, WrapTerm):
-            terms = terms.term
-        if isinstance(terms, MultiTerm):
-            for t in terms.terms:
-                while isinstance(t, WrapTerm):
-                    t = t.term
-                if isinstance(t, GeometricTerm):
-                    terms = t
-                    break
-        if not isinstance(terms, GeometricTerm):
-            raise TypeError("Commutator-free solvers require a GeometricTerm.")
-        return terms
 
     def _apply_exp_product(
         self,
@@ -140,9 +123,7 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
 
         dt = t1 - t0
         control = terms.contr(t0, t1)
-        geometric_term = self._unwrap_geometric_term(terms)
-        if geometric_term.geometry.chart is None:
-            select_chart_for_solver(self, geometric_term)
+        geometric_term = find_geometric_term(terms)
         stages: list[Array] = []
 
         for c_i, exp_rows in zip(self.tableau.c, self.tableau.stage_exps, strict=True):
@@ -203,9 +184,7 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
 
         dt = t1 - t0
         control = terms.contr(t0, t1)
-        geometric_term = self._unwrap_geometric_term(terms)
-        if geometric_term.geometry.chart is None:
-            select_chart_for_solver(self, geometric_term)
+        geometric_term = find_geometric_term(terms)
         stages: list[Array] = []
         last_stage = self.recurrence.num_stages - 1
 

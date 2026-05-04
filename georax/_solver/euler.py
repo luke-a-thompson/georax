@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from typing import ClassVar, override
 
-from diffrax import RESULTS, AbstractTerm, MultiTerm
+from diffrax import RESULTS, AbstractTerm
 from diffrax._custom_types import Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
 from diffrax._local_interpolation import LocalLinearInterpolation
 from diffrax._solver.base import AbstractItoSolver
-from diffrax._term import WrapTerm
 
-from georax._term import GeometricTerm
+from georax._term import find_geometric_term
 
 
 class GeometricEuler(AbstractItoSolver):
@@ -27,26 +26,6 @@ class GeometricEuler(AbstractItoSolver):
     def strong_order(self, terms) -> float:
         return 0.5
 
-    @staticmethod
-    def _unwrap_term(term: AbstractTerm) -> AbstractTerm:
-        while isinstance(term, WrapTerm):
-            term = term.term
-        return term
-
-    @classmethod
-    def _geometric_term(cls, terms: AbstractTerm) -> GeometricTerm:
-        terms = cls._unwrap_term(terms)
-        if isinstance(terms, GeometricTerm):
-            return terms
-        if isinstance(terms, MultiTerm) and len(terms.terms) > 0:
-            first_term = cls._unwrap_term(terms.terms[0])
-            if isinstance(first_term, GeometricTerm):
-                return first_term
-        raise TypeError(
-            "GeometricEuler expects a GeometricTerm, or a MultiTerm whose first "
-            "term is a GeometricTerm."
-        )
-
     @override
     def init(
         self,
@@ -57,7 +36,7 @@ class GeometricEuler(AbstractItoSolver):
         args: Args,
     ) -> None:
         del t0, t1, y0, args
-        geometric_term = self._geometric_term(terms)
+        geometric_term = find_geometric_term(terms)
         geometric_term.geometry.select_chart(2)
         return None
 
@@ -84,7 +63,7 @@ class GeometricEuler(AbstractItoSolver):
     ) -> tuple[Y, None, DenseInfo, None, RESULTS]:
         del solver_state, made_jump
 
-        geometric_term = self._geometric_term(terms)
+        geometric_term = find_geometric_term(terms)
         if geometric_term.geometry.chart is None:
             raise TypeError("GeometricEuler requires a geometry with a selected chart.")
 

@@ -4,8 +4,9 @@ from collections.abc import Callable
 from typing import override
 
 import equinox as eqx
-from diffrax import AbstractTerm
+from diffrax import AbstractTerm, MultiTerm
 from diffrax._custom_types import Args, RealScalarLike, Y
+from diffrax._term import WrapTerm
 from jaxtyping import Array
 
 from georax._geometry import Manifold
@@ -25,7 +26,7 @@ class GeometricTerm(AbstractTerm[Array, RealScalarLike]):
 
     @override
     def vf(self, t: RealScalarLike, y: Y, args: Args) -> Array:
-        return self.coeffs(t, y, args)
+        return self.coeffs_fn(t, y, args)
 
     @override
     def contr(self, t0: RealScalarLike, t1: RealScalarLike, **kwargs) -> RealScalarLike:
@@ -42,13 +43,34 @@ class GeometricTerm(AbstractTerm[Array, RealScalarLike]):
     ) -> Array:
         return self.prod(self.vf(t, y, args), control)
 
-    def coeffs(self, t: RealScalarLike, x: Array, args: Args) -> Array:
-        """Return intrinsic frame coefficients at ``(t, x)``."""
-        return self.coeffs_fn(t, x, args)
-
     def apply_increment(self, x: Array, a: Array) -> Array:
         """Apply one intrinsic frame-coordinate increment via the geometry."""
         return self.geometry.apply_increment(x, a)
+
+
+def unwrap_term(term: AbstractTerm) -> AbstractTerm:
+    """Strip diffrax ``WrapTerm`` wrappers."""
+    while isinstance(term, WrapTerm):
+        term = term.term
+    return term
+
+
+def find_geometric_term(terms: AbstractTerm) -> GeometricTerm:
+    """Return the ``GeometricTerm`` inside ``terms``.
+
+    Looks through ``WrapTerm`` and the entries of a ``MultiTerm``.
+    """
+    base = unwrap_term(terms)
+    if isinstance(base, GeometricTerm):
+        return base
+    if isinstance(base, MultiTerm):
+        for child in base.terms:
+            child = unwrap_term(child)
+            if isinstance(child, GeometricTerm):
+                return child
+    raise TypeError(
+        "Expected a GeometricTerm, or a MultiTerm containing a GeometricTerm."
+    )
 
 
 def select_chart_for_solver(solver, geometric_term: GeometricTerm) -> None:
