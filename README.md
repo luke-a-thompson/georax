@@ -19,6 +19,11 @@ It reuses the wrapped solver's Runge-Kutta coefficients, so you choose accuracy/
 | `CFEES25` | 3 | 2 | Yes | 2N low-storage recurrence |
 | `CFEES27` | 3 | 2 | No | 2N low-storage recurrence |
 
+## Understanding Geometric Integration
+1. Start with a state in the group: $g_t \in G$
+1. Vector fields return a velocity $\zeta \in \mathfrak{g}$, an element of the Lie algebra
+1. The finite update is $g_{t+1} = g_t \exp(h\omega)$, where $\exp$ maps the Lie algebra element $h\omega$ to a group element
+
 ## Usage
 
 ```python
