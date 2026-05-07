@@ -87,7 +87,7 @@ def test_srkmk_slowrk_preserves_so6_torus() -> None:
     diffusion_matrix = jnp.stack(cols, axis=1)
     terms = diffrax.MultiTerm(
         GeometricTerm(
-            lambda t, y, args: jnp.zeros(geometry.lie_algebra_dimension),
+            lambda t, y, args: jnp.zeros(geometry.coordinate_shape),
             geometry=geometry,
         ),
         diffrax.ControlTerm(lambda t, y, args: diffusion_matrix, _brownian((3,), 3)),

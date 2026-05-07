@@ -10,7 +10,7 @@ from diffrax import AbstractTerm, ControlTerm, MultiTerm, ODETerm
 from diffrax._custom_types import Args, RealScalarLike
 from jaxtyping import Array, PyTree
 
-from georax import CFEES25, CFEES27, CG2, CG4, SO, SPD, Euclidean, GeometricTerm, SRKMK
+from georax import CFEES25, CFEES27, CG2, CG4, SO, Euclidean, GeometricTerm, SRKMK
 
 # ── Solvers ────────────────────────────────────────────────────────────────────
 
@@ -31,7 +31,7 @@ SDE_BENCH_SOLVERS = [
 
 
 def bench_solvers_for_case(case: "BenchCase"):
-    if case.name.startswith("sde/") and "/spd" not in case.name:
+    if case.name.startswith("sde/"):
         return SDE_BENCH_SOLVERS
     return BENCH_SOLVERS
 
@@ -97,7 +97,7 @@ def make_solver_accuracy_sde_term(
         t0=0.0,
         t1=1.0,
         tol=bm_tol,
-        shape=(_SO3_GEOMETRY.lie_algebra_dimension,),
+        shape=_SO3_GEOMETRY.coordinate_shape,
         key=key,
     )
 
@@ -252,72 +252,6 @@ _BENCH_SON_SDE_TERM_ARGS = MultiTerm(
     ControlTerm(_son_sde_diffusion, _bench_bm_son),
 )
 
-# ── SPD(N) MLP VF ─────────────────────────────────────────────────────────────
-
-_SPD_N = 6
-_SPD_DIM = _SPD_N * (_SPD_N + 1) // 2  # 528, symmetric frame coords
-_SPD_HIDDEN = 32
-_SPD_AMBIENT_DIM = _SPD_N * _SPD_N
-_SPD_NUM_LAYERS = 3
-_spd_keys = jax.random.split(jax.random.key(13), _SPD_NUM_LAYERS)
-_SPD_W_IN = jax.random.normal(_spd_keys[0], (_SPD_HIDDEN, _SPD_AMBIENT_DIM)) / jnp.sqrt(
-    float(_SPD_AMBIENT_DIM)
-)
-_SPD_W_MID = tuple(
-    jax.random.normal(key, (_SPD_HIDDEN, _SPD_HIDDEN)) / jnp.sqrt(float(_SPD_HIDDEN))
-    for key in _spd_keys[1:-1]
-)
-_SPD_W_OUT = jax.random.normal(_spd_keys[-1], (_SPD_DIM, _SPD_HIDDEN)) / jnp.sqrt(
-    float(_SPD_HIDDEN)
-)
-_SPD_PARAMS = (_SPD_W_IN, _SPD_W_MID, _SPD_W_OUT)
-
-_SPD_GEOMETRY = SPD(_SPD_N)
-
-
-def _spd_apply(weights, S):
-    w_in, w_mid_layers, w_out = weights
-    h = jnp.tanh(w_in @ S.flatten())
-    for w_mid in w_mid_layers:
-        h = jnp.tanh(w_mid @ h)
-    return -0.1 * (w_out @ h)  # (dim spd(n),) frame coords
-
-
-_SPD_NOISE_SCALE = jnp.full((_SPD_DIM,), 0.05)
-_bench_bm_spd = diffrax.VirtualBrownianTree(
-    t0=0.0,
-    t1=1.0,
-    tol=1e-3,
-    shape=(_SPD_DIM,),
-    key=jax.random.key(2),
-    levy_area=diffrax.SpaceTimeLevyArea,
-)
-
-
-def _spd_sde_diffusion(t, S, args):
-    del t, S, args
-    return lx.DiagonalLinearOperator(_SPD_NOISE_SCALE)
-
-
-_BENCH_SPD_ODE_TERM_GLOBAL = GeometricTerm(
-    lambda t, S, args: _spd_apply(_SPD_PARAMS, S),
-    geometry=_SPD_GEOMETRY,
-)
-_BENCH_SPD_ODE_TERM_ARGS = GeometricTerm(
-    lambda t, S, args: _spd_apply(args, S),
-    geometry=_SPD_GEOMETRY,
-)
-_BENCH_SPD_SDE_TERM_GLOBAL = MultiTerm(
-    GeometricTerm(
-        lambda t, S, args: _spd_apply(_SPD_PARAMS, S), geometry=_SPD_GEOMETRY
-    ),
-    ControlTerm(_spd_sde_diffusion, _bench_bm_spd),
-)
-_BENCH_SPD_SDE_TERM_ARGS = MultiTerm(
-    GeometricTerm(lambda t, S, args: _spd_apply(args, S), geometry=_SPD_GEOMETRY),
-    ControlTerm(_spd_sde_diffusion, _bench_bm_spd),
-)
-
 # ── Benchmark Cases ────────────────────────────────────────────────────────────
 
 
@@ -351,14 +285,5 @@ BENCH_CASES = [
         _BENCH_SON_SDE_TERM_GLOBAL,
         _BENCH_SON_SDE_TERM_ARGS,
         _SON_PARAMS,
-    ),
-    *_bench_group(
-        f"spd{_SPD_N}",
-        jnp.eye(_SPD_N, dtype=jnp.float32),
-        _BENCH_SPD_ODE_TERM_GLOBAL,
-        _BENCH_SPD_ODE_TERM_ARGS,
-        _BENCH_SPD_SDE_TERM_GLOBAL,
-        _BENCH_SPD_SDE_TERM_ARGS,
-        _SPD_PARAMS,
     ),
 ]

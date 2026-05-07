@@ -124,6 +124,8 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
         dt = t1 - t0
         control = terms.contr(t0, t1)
         geometric_term = find_geometric_term(terms)
+        if geometric_term.geometry.chart is None:
+            select_chart_for_solver(self, geometric_term)
         stages: list[Array] = []
 
         for c_i, exp_rows in zip(self.tableau.c, self.tableau.stage_exps, strict=True):
@@ -185,6 +187,8 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
         dt = t1 - t0
         control = terms.contr(t0, t1)
         geometric_term = find_geometric_term(terms)
+        if geometric_term.geometry.chart is None:
+            select_chart_for_solver(self, geometric_term)
         stages: list[Array] = []
         last_stage = self.recurrence.num_stages - 1
 

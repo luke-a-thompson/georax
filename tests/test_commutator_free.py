@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import jax
 import jax.numpy as jnp
@@ -31,21 +31,21 @@ from georax._solver.commutator_free import CommutatorFreeTableau
 from georax._term import GeometricTerm
 
 
-class AffineRetractionOps(Manifold):
+class AffineRetractionOps(Manifold["AffineRetractionOps"]):
     scale: float = 1.0
 
     def __init__(self, scale: float = 1.0):
         object.__setattr__(self, "scale", scale)
         object.__setattr__(self, "chart", _AffineRetractionChart())
 
-    def select_chart(self, required_order) -> LocalChart:
+    def select_chart(self, required_order) -> LocalChart[AffineRetractionOps]:
         del required_order
-        chart: LocalChart = _AffineRetractionChart()
+        chart: LocalChart[AffineRetractionOps] = _AffineRetractionChart()
         object.__setattr__(self, "chart", chart)
         return chart
 
 
-class _AffineRetractionChart(LocalChart):
+class _AffineRetractionChart(LocalChart[AffineRetractionOps]):
     order: int | str = "exact"
     inverse_order: int | str = "exact"
 
@@ -79,7 +79,7 @@ def _low_storage_solver_type(name: str, recurrence: LowStorageRecurrence, order:
     return type(name, (LowStorageSolver,), {"recurrence": recurrence, "_order": order})
 
 
-def _make_term(vf, geometry: Manifold) -> GeometricTerm:
+def _make_term(vf, geometry: Manifold[Any]) -> GeometricTerm:
     return GeometricTerm(vf, geometry=geometry)
 
 
@@ -283,7 +283,7 @@ def test_spd_control_term_step_preserves_spd() -> None:
     term = MultiTerm(
         GeometricTerm(lambda t, x, args: jnp.zeros_like(control), geometry=geometry),
         ControlTerm(
-            lambda t, x, args: jnp.eye(geometry.dimension),
+            lambda t, x, args: jnp.eye(geometry.coordinate_shape[0]),
             lambda t0, t1, **kwargs: control,
         ),
     )
