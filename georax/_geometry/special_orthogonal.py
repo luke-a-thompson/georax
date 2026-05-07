@@ -8,13 +8,13 @@ import numpy as np
 from diffrax._custom_types import RealScalarLike
 from jaxtyping import Array
 
-from ._charts import CayleyChart, QRTaylorChart
+from ._charts import SOChart
 from .base import LocalChart, Manifold
 
 __all__ = ["SO"]
 
 
-class SO(Manifold):
+class SO(Manifold["SO"]):
     """SO(n) with a left-invariant frame and Cayley retraction."""
 
     n: int = eqx.field(static=True)
@@ -40,10 +40,15 @@ class SO(Manifold):
         object.__setattr__(self, "_basis", jnp.asarray(basis))
 
     @property
-    def lie_algebra_dimension(self) -> int:
-        return int(self._upper_i.size)
+    def state_shape(self) -> tuple[int, int]:
+        return (self.n, self.n)
+
+    @property
+    def coordinate_shape(self) -> tuple[int]:
+        return (int(self._upper_i.size),)
 
     def _coords_to_alg(self, a: Array, *, dtype=None) -> Array:
+        self.check_coordinate_shape(a)
         coeffs = jnp.asarray(a, dtype=dtype)
         omega = jnp.zeros((self.n, self.n), dtype=coeffs.dtype)
         omega = omega.at[self._upper_i, self._upper_j].set(coeffs)
@@ -51,15 +56,13 @@ class SO(Manifold):
         return omega
 
     def _alg_to_coords(self, omega: Array) -> Array:
+        if omega.shape != self.state_shape:
+            raise ValueError(f"{type(self).__name__} Lie algebra matrix must have shape {self.state_shape}; got {omega.shape}.")
         omega = 0.5 * (omega - omega.T)
         return omega[self._upper_i, self._upper_j]
 
     @override
-    def select_chart(self, required_order: RealScalarLike) -> LocalChart:
-        if required_order <= 2:
-            chart = CayleyChart()
-        else:
-            chart = QRTaylorChart(int(required_order))
-
+    def select_chart(self, required_order: RealScalarLike) -> LocalChart[SO]:
+        chart = SOChart(int(required_order))
         object.__setattr__(self, "chart", chart)
         return chart

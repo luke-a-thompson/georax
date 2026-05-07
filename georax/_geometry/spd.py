@@ -9,7 +9,7 @@ from diffrax._custom_types import RealScalarLike
 from jaxtyping import Array
 
 from ._charts import (
-    CongruenceTaylorChart,
+    SPDChart,
     _sym,
 )
 from .base import LocalChart, Manifold
@@ -17,7 +17,7 @@ from .base import LocalChart, Manifold
 __all__ = ["SPD"]
 
 
-class SPD(Manifold):
+class SPD(Manifold["SPD"]):
     """SPD(n) with scaled-``vech`` symmetric-lift coordinates.
 
     Coefficients are represented in the symmetric matrix algebra. The induced
@@ -60,14 +60,19 @@ class SPD(Manifold):
         object.__setattr__(self, "_basis", jnp.asarray(basis))
 
     @property
-    def dimension(self) -> int:
-        return self.n * (self.n + 1) // 2
+    def state_shape(self) -> tuple[int, int]:
+        return (self.n, self.n)
+
+    @property
+    def coordinate_shape(self) -> tuple[int]:
+        return (self.n * (self.n + 1) // 2,)
 
     def _coords_to_sym(self, a: Array) -> Array:
+        self.check_coordinate_shape(a)
         coeffs = jnp.asarray(a)
         tangent = jnp.zeros((self.n, self.n), dtype=coeffs.dtype)
         tangent = tangent.at[self._diag_i, self._diag_i].set(coeffs[: self.n])
-        if self.dimension > self.n:
+        if self.coordinate_shape[0] > self.n:
             sqrt_two = jnp.asarray(np.sqrt(2.0), dtype=coeffs.dtype)
             off_diag = coeffs[self.n :] / sqrt_two
             tangent = tangent.at[self._upper_i, self._upper_j].set(off_diag)
@@ -75,6 +80,8 @@ class SPD(Manifold):
         return tangent
 
     def _sym_to_coords(self, tangent: Array) -> Array:
+        if tangent.shape != self.state_shape:
+            raise ValueError(f"{type(self).__name__} symmetric matrix must have shape {self.state_shape}; got {tangent.shape}.")
         tangent = _sym(jnp.asarray(tangent))
         diag = tangent[self._diag_i, self._diag_i]
         sqrt_two = jnp.asarray(np.sqrt(2.0), dtype=tangent.dtype)
@@ -82,7 +89,7 @@ class SPD(Manifold):
         return jnp.concatenate((diag, off_diag))
 
     @override
-    def select_chart(self, required_order: RealScalarLike) -> LocalChart:
-        chart = CongruenceTaylorChart(int(required_order))
+    def select_chart(self, required_order: RealScalarLike) -> LocalChart[SPD]:
+        chart = SPDChart(int(required_order))
         object.__setattr__(self, "chart", chart)
         return chart

@@ -6,11 +6,12 @@ from jaxtyping import Array
 from .base import LocalChart, Manifold, chart_order
 
 
-class EuclideanChart(LocalChart):
+class EuclideanChart(LocalChart["Euclidean"]):
     order: RealScalarLike = 12
     inverse_order: RealScalarLike = 12
 
     def apply(self, x: Array, a: Array, geometry: Euclidean) -> Array:
+        del geometry
         return x + a
 
     def inverse_differential(
@@ -20,11 +21,11 @@ class EuclideanChart(LocalChart):
         return b
 
 
-class Euclidean(Manifold):
+class Euclidean(Manifold["Euclidean"]):
     """R^n with the standard frame, addition retraction, and exact chart."""
 
-    def select_chart(self, required_order: RealScalarLike) -> LocalChart:
+    def select_chart(self, required_order: RealScalarLike) -> LocalChart[Euclidean]:
         del required_order
-        chart: LocalChart = EuclideanChart()
+        chart: LocalChart[Euclidean] = EuclideanChart()
         object.__setattr__(self, "chart", chart)
         return chart

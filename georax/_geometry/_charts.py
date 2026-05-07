@@ -87,10 +87,6 @@ def _horner_taylor_expm(a: Array, degree: int) -> Array:
 
 
 def _taylor_expm(a: Array, degree: int) -> Array:
-    # Static dispatch: `degree` is fixed at chart construction, so Python
-    # branching here selects one scheme at trace time and JAX sees a fully
-    # unrolled graph for that scheme alone.
-    degree = int(degree)
     if degree <= 2:
         return _quadratic_expm(a)
     if degree <= 4:
@@ -106,32 +102,19 @@ def _sym(a: Array) -> Array:
     return 0.5 * (a + a.T)
 
 
+def _cayley(a: Array) -> Array:
+    ident = jnp.eye(a.shape[0], dtype=a.dtype)
+    return jnp.linalg.solve(ident - 0.5 * a, ident + 0.5 * a)
+
+
 # ---------------------------------------------------------------------------
 # SO(n) charts
 # ---------------------------------------------------------------------------
 
 
-class CayleyChart(LocalChart):
-    order: RealScalarLike = 2
-    inverse_order: RealScalarLike = 2
+class SOChart(LocalChart["SO"]):
+    """SO(n) chart using Cayley at order 2 and Taylor+QR at higher orders."""
 
-    def apply(self, x: Array, a: Array, geometry: SO) -> Array:
-        omega = geometry._coords_to_alg(a, dtype=x.dtype)
-        ident = jnp.eye(geometry.n, dtype=x.dtype)
-        q = jnp.linalg.solve(ident - 0.5 * omega, ident + 0.5 * omega)
-        return x @ q
-
-    def inverse_differential(self, x: Array, a: Array, b: Array, geometry: SO) -> Array:
-        del x
-        omega = geometry._coords_to_alg(a)
-        eta = geometry._coords_to_alg(b)
-        ident = jnp.eye(geometry.n, dtype=eta.dtype)
-        corrected = (ident + 0.5 * omega) @ eta @ (ident - 0.5 * omega)
-        return geometry._alg_to_coords(corrected)
-
-
-class QRTaylorChart(LocalChart):
-    # BBC Taylor evaluation + QR projection onto SO(n) to kill truncation drift.
     order: RealScalarLike
     inverse_order: RealScalarLike
     degree: int
@@ -147,10 +130,26 @@ class QRTaylorChart(LocalChart):
 
     def apply(self, x: Array, a: Array, geometry: SO) -> Array:
         omega = geometry._coords_to_alg(a, dtype=x.dtype)
+        if self.order <= 2:
+            return x @ _cayley(omega)
+
         g = _taylor_expm(omega, self.degree)
         q, r = jnp.linalg.qr(g)
         q = q * jnp.sign(jnp.diag(r))
         return x @ q
+
+    def inverse_differential(self, x: Array, a: Array, b: Array, geometry: SO) -> Array:
+        if self.order > 2:
+            raise NotImplementedError(
+                "SOChart only implements inverse_differential for the order-2 "
+                "Cayley chart."
+            )
+        del x
+        omega = geometry._coords_to_alg(a)
+        eta = geometry._coords_to_alg(b)
+        ident = jnp.eye(geometry.n, dtype=eta.dtype)
+        corrected = (ident + 0.5 * omega) @ eta @ (ident - 0.5 * omega)
+        return geometry._alg_to_coords(corrected)
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +157,7 @@ class QRTaylorChart(LocalChart):
 # ---------------------------------------------------------------------------
 
 
-class CongruenceTaylorChart(LocalChart):
+class SPDChart(LocalChart["SPD"]):
     order: RealScalarLike
     inverse_order: RealScalarLike
     degree: int
