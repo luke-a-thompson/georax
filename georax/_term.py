@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import override
+from typing import Any, override
 
 import equinox as eqx
 from diffrax import AbstractTerm, MultiTerm
@@ -15,11 +15,13 @@ from georax._geometry import Manifold
 class GeometricTerm(AbstractTerm[Array, RealScalarLike]):
     """Intrinsic manifold term whose vector field is given in frame coordinates."""
 
-    geometry: Manifold
+    geometry: Manifold[Any]
     coeffs_fn: Callable[[RealScalarLike, Array, Args], Array] = eqx.field(static=True)
 
     def __init__(
-        self, coeffs: Callable[[RealScalarLike, Array, Args], Array], geometry: Manifold
+        self,
+        coeffs: Callable[[RealScalarLike, Array, Args], Array],
+        geometry: Manifold[Any],
     ):
         object.__setattr__(self, "coeffs_fn", coeffs)
         object.__setattr__(self, "geometry", geometry)
@@ -56,10 +58,7 @@ def unwrap_term(term: AbstractTerm) -> AbstractTerm:
 
 
 def find_geometric_term(terms: AbstractTerm) -> GeometricTerm:
-    """Return the ``GeometricTerm`` inside ``terms``.
-
-    Looks through ``WrapTerm`` and the entries of a ``MultiTerm``.
-    """
+    """Locate the :class:`GeometricTerm` inside a possibly wrapped term."""
     base = unwrap_term(terms)
     if isinstance(base, GeometricTerm):
         return base
@@ -69,7 +68,8 @@ def find_geometric_term(terms: AbstractTerm) -> GeometricTerm:
             if isinstance(child, GeometricTerm):
                 return child
     raise TypeError(
-        "Expected a GeometricTerm, or a MultiTerm containing a GeometricTerm."
+        "Expected a GeometricTerm, or a MultiTerm containing a GeometricTerm; "
+        f"got {type(base).__name__}."
     )
 
 
