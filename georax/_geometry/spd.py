@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-from typing import override
-
 import equinox as eqx
 import jax.numpy as jnp
 import numpy as np
-from diffrax._custom_types import RealScalarLike
 from jaxtyping import Array
 
 from ._charts import (
     SPDChart,
     _sym,
 )
-from .base import LocalChart, Manifold
+from .base import Manifold
 
 __all__ = ["SPD"]
 
@@ -30,6 +27,7 @@ class SPD(Manifold["SPD"]):
         Phi_A(x) = exp(A) x exp(A).
     """
 
+    _chart_class = SPDChart
     n: int = eqx.field(static=True)
     _diag_i: Array
     _upper_i: Array
@@ -81,15 +79,30 @@ class SPD(Manifold["SPD"]):
 
     def _sym_to_coords(self, tangent: Array) -> Array:
         if tangent.shape != self.state_shape:
-            raise ValueError(f"{type(self).__name__} symmetric matrix must have shape {self.state_shape}; got {tangent.shape}.")
+            raise ValueError(
+                f"{type(self).__name__} symmetric matrix must have shape {self.state_shape}; got {tangent.shape}."
+            )
         tangent = _sym(jnp.asarray(tangent))
         diag = tangent[self._diag_i, self._diag_i]
         sqrt_two = jnp.asarray(np.sqrt(2.0), dtype=tangent.dtype)
         off_diag = sqrt_two * tangent[self._upper_i, self._upper_j]
         return jnp.concatenate((diag, off_diag))
 
-    @override
-    def select_chart(self, required_order: RealScalarLike) -> LocalChart[SPD]:
-        chart = SPDChart(int(required_order))
-        object.__setattr__(self, "chart", chart)
-        return chart
+    def trivialise(self, x: Array, v: Array) -> Array:
+        self.check_state_shape(x)
+        self.check_state_shape(v)
+        eigvals, eigvecs = jnp.linalg.eigh(_sym(x))
+        local_v = eigvecs.T @ _sym(v) @ eigvecs
+        local_a = local_v / (eigvals[:, None] + eigvals[None, :])
+        return self._sym_to_coords(eigvecs @ local_a @ eigvecs.T)
+
+    def detrivialise(self, x: Array, a: Array) -> Array:
+        self.check_state_shape(x)
+        lift = self._coords_to_sym(a)
+        return lift @ x + x @ lift
+
+    def frame_bracket(self, a: Array, b: Array) -> Array:
+        del a, b
+        raise NotImplementedError(
+            "SPD frame coordinates are not closed under commutator."
+        )

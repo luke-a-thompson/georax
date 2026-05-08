@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-from typing import override
-
 import equinox as eqx
 import jax.numpy as jnp
 import numpy as np
-from diffrax._custom_types import RealScalarLike
 from jaxtyping import Array
 
 from ._charts import SOChart
-from .base import LocalChart, Manifold
+from .base import Manifold
 
 __all__ = ["SO"]
 
@@ -17,6 +14,7 @@ __all__ = ["SO"]
 class SO(Manifold["SO"]):
     """SO(n) with a left-invariant frame and Cayley retraction."""
 
+    _chart_class = SOChart
     n: int = eqx.field(static=True)
     _upper_i: Array
     _upper_j: Array
@@ -57,12 +55,22 @@ class SO(Manifold["SO"]):
 
     def _alg_to_coords(self, omega: Array) -> Array:
         if omega.shape != self.state_shape:
-            raise ValueError(f"{type(self).__name__} Lie algebra matrix must have shape {self.state_shape}; got {omega.shape}.")
+            raise ValueError(
+                f"{type(self).__name__} Lie algebra matrix must have shape {self.state_shape}; got {omega.shape}."
+            )
         omega = 0.5 * (omega - omega.T)
         return omega[self._upper_i, self._upper_j]
 
-    @override
-    def select_chart(self, required_order: RealScalarLike) -> LocalChart[SO]:
-        chart = SOChart(int(required_order))
-        object.__setattr__(self, "chart", chart)
-        return chart
+    def trivialise(self, x: Array, v: Array) -> Array:
+        self.check_state_shape(x)
+        self.check_state_shape(v)
+        return self._alg_to_coords(x.T @ v)
+
+    def detrivialise(self, x: Array, a: Array) -> Array:
+        self.check_state_shape(x)
+        return x @ self._coords_to_alg(a, dtype=x.dtype)
+
+    def frame_bracket(self, a: Array, b: Array) -> Array:
+        omega_a = self._coords_to_alg(a)
+        omega_b = self._coords_to_alg(b)
+        return self._alg_to_coords(omega_a @ omega_b - omega_b @ omega_a)
