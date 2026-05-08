@@ -11,7 +11,7 @@ from diffrax._solver.base import AbstractSolver, AbstractWrappedSolver
 from diffrax._solver.runge_kutta import AbstractERK
 from jaxtyping import Array
 
-from georax._term import GeometricTerm, find_geometric_term, select_chart_for_solver
+from georax._term import GeometricTerm, find_geometry, select_chart_for_solver
 
 
 class _PulledTerm(AbstractTerm[Array, RealScalarLike]):
@@ -26,7 +26,7 @@ class _PulledTerm(AbstractTerm[Array, RealScalarLike]):
         chart = geometry.chart
         if chart is None:
             raise TypeError("RKMK requires a geometry with a selected chart.")
-        y = self.drift_term.apply_increment(self.y_anchor, omega)
+        y = geometry.apply_increment(self.y_anchor, omega)
         raw = self.drift_term.vf(t, y, args)
         return chart.inverse_differential(self.y_anchor, omega, raw, geometry)
 
@@ -83,7 +83,7 @@ class RKMK(AbstractWrappedSolver):
         args: Args,
     ) -> None:
         del t0, t1, y0, args
-        select_chart_for_solver(self, find_geometric_term(terms))
+        select_chart_for_solver(self, find_geometry(terms))
         return None
 
     @override
@@ -109,21 +109,27 @@ class RKMK(AbstractWrappedSolver):
     ) -> tuple[Y, Y | None, DenseInfo, None, RESULTS]:
         del solver_state
 
-        drift_term = find_geometric_term(terms)
-        if drift_term.geometry.chart is None:
+        geometry = find_geometry(terms)
+        if geometry.chart is None:
             raise TypeError("RKMK requires a GeometricTerm geometry with a chart.")
 
-        algebra_term = _PulledTerm(drift_term, y0)
-        omega0 = jnp.zeros_like(drift_term.vf(t0, y0, args))
+        algebra_term = _PulledTerm(terms, y0)
+        omega0 = jnp.zeros_like(terms.vf(t0, y0, args))
 
         omega1, omega_error, _, _, result = self.solver.step(
-            algebra_term, t0, t1, omega0, args, None, made_jump,
+            algebra_term,
+            t0,
+            t1,
+            omega0,
+            args,
+            None,
+            made_jump,
         )
-        y1 = drift_term.apply_increment(y0, omega1)
+        y1 = geometry.apply_increment(y0, omega1)
 
         y_error = None
         if omega_error is not None:
-            y_error = drift_term.apply_increment(y0, omega_error) - y0
+            y_error = geometry.apply_increment(y0, omega_error) - y0
 
         dense_info = dict(y0=y0, y1=y1)
         return y1, y_error, dense_info, None, result

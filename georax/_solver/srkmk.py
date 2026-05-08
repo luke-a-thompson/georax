@@ -16,7 +16,12 @@ from diffrax._solver.srk import (
 )
 from jaxtyping import Array
 
-from georax._term import GeometricTerm, select_chart_for_solver, unwrap_term
+from georax._term import (
+    GeometricTerm,
+    find_geometry,
+    select_chart_for_solver,
+    unwrap_term,
+)
 
 
 class _PulledDriftTerm(AbstractTerm[Array, RealScalarLike]):
@@ -32,7 +37,7 @@ class _PulledDriftTerm(AbstractTerm[Array, RealScalarLike]):
         if chart is None:
             raise TypeError("SRKMK requires a geometry with a selected chart.")
 
-        y = self.drift_term.apply_increment(self.y_anchor, omega)
+        y = geometry.apply_increment(self.y_anchor, omega)
         raw = self.drift_term.vf(t, y, args)
         return chart.inverse_differential(self.y_anchor, omega, raw, geometry)
 
@@ -62,7 +67,7 @@ class _PulledDiffusionTerm(AbstractTerm[VF, object]):
 
     @override
     def vf(self, t: RealScalarLike, omega: Array, args: Args) -> VF:
-        y = self.drift_term.apply_increment(self.y_anchor, omega)
+        y = self.drift_term.geometry.apply_increment(self.y_anchor, omega)
         return self.diffusion_term.vf(t, y, args)
 
     @override
@@ -94,7 +99,7 @@ class _PulledDiffusionTerm(AbstractTerm[VF, object]):
         if chart is None:
             raise TypeError("SRKMK requires a geometry with a selected chart.")
 
-        y = self.drift_term.apply_increment(self.y_anchor, omega)
+        y = geometry.apply_increment(self.y_anchor, omega)
         raw_vf = self.diffusion_term.vf(t, y, args)
         raw_increment = self.diffusion_term.prod(raw_vf, control)
         return chart.inverse_differential(self.y_anchor, omega, raw_increment, geometry)
@@ -208,7 +213,7 @@ class SRKMK(AbstractWrappedSolver):
         # Chart selection is delegated to the geometry. For exponential-style
         # charts this should be conservative enough to satisfy the SRKMK
         # truncation condition for the wrapped method.
-        select_chart_for_solver(self, drift_term)
+        select_chart_for_solver(self, drift_term.geometry)
 
         # Defer to the wrapped SRK's init for any trace-time validation. For
         # additive tableaus this performs a JVP check that the (pulled-back)
@@ -248,7 +253,8 @@ class SRKMK(AbstractWrappedSolver):
         del solver_state
 
         drift_term, diffusion_term = self._split_terms(terms)
-        chart = drift_term.geometry.chart
+        geometry = find_geometry(terms)
+        chart = geometry.chart
         if chart is None:
             raise TypeError("SRKMK requires a geometry with a selected chart.")
 
@@ -267,11 +273,11 @@ class SRKMK(AbstractWrappedSolver):
             None,
             made_jump,
         )
-        y1 = drift_term.apply_increment(y0, omega1)
+        y1 = geometry.apply_increment(y0, omega1)
 
         y_error = None
         if omega_error is not None:
-            y_error = drift_term.apply_increment(y0, omega_error) - y0
+            y_error = geometry.apply_increment(y0, omega_error) - y0
 
         dense_info = dict(y0=y0, y1=y1)
         return y1, y_error, dense_info, None, result

@@ -10,7 +10,15 @@ from georax._solver import (
     AbstractLowStorageCommutatorFreeSolver,
 )
 
-from ._geometry import SO, SPD, Euclidean, LocalChart, Manifold
+from ._geometry import (
+    SO,
+    SPD,
+    Euclidean,
+    LocalChart,
+    Manifold,
+    covariant_derivative,
+    post_lie_bracket,
+)
 from ._term import GeometricTerm
 
 __all__ = [
@@ -25,6 +33,8 @@ __all__ = [
     "SRKMK",
     "Manifold",
     "LocalChart",
+    "covariant_derivative",
+    "post_lie_bracket",
     "Euclidean",
     "SO",
     "SPD",

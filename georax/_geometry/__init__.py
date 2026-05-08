@@ -1,4 +1,4 @@
-from .base import LocalChart, Manifold
+from .base import LocalChart, Manifold, covariant_derivative, post_lie_bracket
 from ._charts import (
     SPDChart,
     SOChart,
@@ -10,6 +10,8 @@ from .special_orthogonal import SO
 __all__ = [
     "Manifold",
     "LocalChart",
+    "covariant_derivative",
+    "post_lie_bracket",
     "SPDChart",
     "SOChart",
     "Euclidean",

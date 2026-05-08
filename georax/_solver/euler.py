@@ -7,7 +7,7 @@ from diffrax._custom_types import Args, BoolScalarLike, DenseInfo, RealScalarLik
 from diffrax._local_interpolation import LocalLinearInterpolation
 from diffrax._solver.base import AbstractItoSolver
 
-from georax._term import find_geometric_term
+from georax._term import find_geometry
 
 
 class GeometricEuler(AbstractItoSolver):
@@ -36,8 +36,8 @@ class GeometricEuler(AbstractItoSolver):
         args: Args,
     ) -> None:
         del t0, t1, y0, args
-        geometric_term = find_geometric_term(terms)
-        geometric_term.geometry.select_chart(2)
+        geometry = find_geometry(terms)
+        geometry.select_chart(2)
         return None
 
     @override
@@ -63,14 +63,14 @@ class GeometricEuler(AbstractItoSolver):
     ) -> tuple[Y, None, DenseInfo, None, RESULTS]:
         del solver_state, made_jump
 
-        geometric_term = find_geometric_term(terms)
-        if geometric_term.geometry.chart is None:
+        geometry = find_geometry(terms)
+        if geometry.chart is None:
             raise TypeError("GeometricEuler requires a geometry with a selected chart.")
 
         vf = terms.vf(t0, y0, args)
         control = terms.contr(t0, t1)
         increment = terms.prod(vf, control)
-        y1 = geometric_term.apply_increment(y0, increment)
+        y1 = geometry.apply_increment(y0, increment)
 
         dense_info = dict(y0=y0, y1=y1)
         return y1, None, dense_info, None, RESULTS.successful

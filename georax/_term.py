@@ -39,16 +39,6 @@ class GeometricTerm(AbstractTerm[Array, RealScalarLike]):
     def prod(self, vf: Array, control: RealScalarLike) -> Y:
         return vf * control
 
-    @override
-    def vf_prod(
-        self, t: RealScalarLike, y: Y, args: Args, control: RealScalarLike
-    ) -> Array:
-        return self.prod(self.vf(t, y, args), control)
-
-    def apply_increment(self, x: Array, a: Array) -> Array:
-        """Apply one intrinsic frame-coordinate increment via the geometry."""
-        return self.geometry.apply_increment(x, a)
-
 
 def unwrap_term(term: AbstractTerm) -> AbstractTerm:
     """Strip diffrax ``WrapTerm`` wrappers."""
@@ -57,26 +47,26 @@ def unwrap_term(term: AbstractTerm) -> AbstractTerm:
     return term
 
 
-def find_geometric_term(terms: AbstractTerm) -> GeometricTerm:
-    """Locate the :class:`GeometricTerm` inside a possibly wrapped term."""
+def find_geometry(terms: AbstractTerm) -> Manifold[Any]:
+    """Locate the geometry inside a possibly wrapped geometric term."""
     base = unwrap_term(terms)
     if isinstance(base, GeometricTerm):
-        return base
+        return base.geometry
     if isinstance(base, MultiTerm):
         for child in base.terms:
             child = unwrap_term(child)
             if isinstance(child, GeometricTerm):
-                return child
+                return child.geometry
     raise TypeError(
         "Expected a GeometricTerm, or a MultiTerm containing a GeometricTerm; "
         f"got {type(base).__name__}."
     )
 
 
-def select_chart_for_solver(solver, geometric_term: GeometricTerm) -> None:
+def select_chart_for_solver(solver, geometry: Manifold[Any]) -> None:
     """Select a chart based on the highest order the solver may need."""
     orders = [
-        getattr(solver, name, lambda _: None)(geometric_term)
+        getattr(solver, name, lambda _: None)(geometry)
         for name in ("order", "error_order", "antisymmetric_order")
     ]
     orders = [int(o) for o in orders if o is not None]
@@ -84,4 +74,4 @@ def select_chart_for_solver(solver, geometric_term: GeometricTerm) -> None:
         raise ValueError(
             f"Solver {type(solver).__name__} provides no order for chart selection."
         )
-    geometric_term.geometry.select_chart(max(orders))
+    geometry.select_chart(max(orders))

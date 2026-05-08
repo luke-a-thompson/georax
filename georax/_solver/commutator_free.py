@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import ClassVar, override
+from typing import Any, ClassVar, override
 
 import jax.numpy as jnp
 import numpy as np
@@ -16,7 +16,8 @@ from diffrax._custom_types import VF, Args, BoolScalarLike, DenseInfo, RealScala
 from diffrax_lowstorage import LowStorageRecurrence
 from jaxtyping import Array
 
-from georax._term import GeometricTerm, find_geometric_term, select_chart_for_solver
+from georax._geometry import Manifold
+from georax._term import GeometricTerm, find_geometry, select_chart_for_solver
 
 
 @dataclass(frozen=True)
@@ -80,7 +81,7 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
         args: Args,
     ) -> None:
         del t0, t1, y0, args
-        select_chart_for_solver(self, find_geometric_term(terms))
+        select_chart_for_solver(self, find_geometry(terms))
         return None
 
     @override
@@ -98,14 +99,14 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
         y_base: Array,
         exp_rows: tuple[np.ndarray, ...],
         stages: list[Array],
-        geometric_term: GeometricTerm,
+        geometry: Manifold[Any],
     ) -> Array:
         y = y_base
         for row in exp_rows:
             coeffs = jnp.zeros_like(stages[0])
             for weight, stage in zip(row, stages, strict=True):
                 coeffs = coeffs + jnp.asarray(weight, dtype=stage.dtype) * stage
-            y = geometric_term.apply_increment(y, coeffs)
+            y = geometry.apply_increment(y, coeffs)
         return y
 
     @override
@@ -123,19 +124,19 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
 
         dt = t1 - t0
         control = terms.contr(t0, t1)
-        geometric_term = find_geometric_term(terms)
-        if geometric_term.geometry.chart is None:
-            select_chart_for_solver(self, geometric_term)
+        geometry = find_geometry(terms)
+        if geometry.chart is None:
+            raise TypeError(
+                f"{type(self).__name__} requires a geometry with a selected chart."
+            )
         stages: list[Array] = []
 
         for c_i, exp_rows in zip(self.tableau.c, self.tableau.stage_exps, strict=True):
-            y_stage = self._apply_exp_product(y0, exp_rows, stages, geometric_term)
+            y_stage = self._apply_exp_product(y0, exp_rows, stages, geometry)
             t_stage = t1 if c_i == 1.0 else t0 + c_i * dt
             stages.append(terms.prod(terms.vf(t_stage, y_stage, args), control))
 
-        y1 = self._apply_exp_product(
-            y0, self.tableau.final_exps, stages, geometric_term
-        )
+        y1 = self._apply_exp_product(y0, self.tableau.final_exps, stages, geometry)
 
         y_error = None
         if self.tableau.embedded_final_exps is not None:
@@ -143,7 +144,7 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
                 y0,
                 self.tableau.embedded_final_exps,
                 stages,
-                geometric_term,
+                geometry,
             )
             # This ambient subtraction is acceptable for now; a geometry-aware
             # difference may be preferable for manifold error control later.
@@ -186,18 +187,18 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
 
         dt = t1 - t0
         control = terms.contr(t0, t1)
-        geometric_term = find_geometric_term(terms)
-        if geometric_term.geometry.chart is None:
-            select_chart_for_solver(self, geometric_term)
+        geometry = find_geometry(terms)
+        if geometry.chart is None:
+            raise TypeError(
+                f"{type(self).__name__} requires a geometry with a selected chart."
+            )
         stages: list[Array] = []
         last_stage = self.recurrence.num_stages - 1
 
         t_stage0 = t1 if self.recurrence.C[0] == 1.0 else t0 + c[0] * dt
         tmp = terms.prod(terms.vf(t_stage0, y0, args), control)
         stages.append(tmp)
-        y1 = geometric_term.apply_increment(
-            y0, jnp.asarray(b[0], dtype=tmp.dtype) * tmp
-        )
+        y1 = geometry.apply_increment(y0, jnp.asarray(b[0], dtype=tmp.dtype) * tmp)
 
         y_penultimate = None
         for stage_index in range(1, self.recurrence.num_stages):
@@ -211,7 +212,7 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
             tmp = jnp.asarray(a[stage_index - 1], dtype=tmp.dtype) * tmp + coeffs
             if self._tracks_penultimate and stage_index == last_stage:
                 y_penultimate = y1
-            y1 = geometric_term.apply_increment(
+            y1 = geometry.apply_increment(
                 y1, jnp.asarray(b[stage_index], dtype=tmp.dtype) * tmp
             )
 
@@ -226,7 +227,7 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
                 y_penultimate,
                 self.embedded_penultimate_exps,
                 stages,
-                geometric_term,
+                geometry,
             )
             y_error = y1 - y_hat
         elif y_penultimate is not None:
