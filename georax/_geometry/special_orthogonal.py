@@ -6,7 +6,7 @@ import numpy as np
 from jaxtyping import Array
 
 from ._charts import SOChart
-from .base import Manifold
+from .base import FrameCoords, Manifold, StateMatrix
 
 __all__ = ["SO"]
 
@@ -45,15 +45,15 @@ class SO(Manifold["SO"]):
     def coordinate_shape(self) -> tuple[int]:
         return (int(self._upper_i.size),)
 
-    def _coords_to_alg(self, a: Array, *, dtype=None) -> Array:
+    def _coords_to_alg(self, a: FrameCoords) -> Array:
         self.check_coordinate_shape(a)
-        coeffs = jnp.asarray(a, dtype=dtype)
+        coeffs = jnp.asarray(a)
         omega = jnp.zeros((self.n, self.n), dtype=coeffs.dtype)
         omega = omega.at[self._upper_i, self._upper_j].set(coeffs)
         omega = omega.at[self._upper_j, self._upper_i].set(-coeffs)
         return omega
 
-    def _alg_to_coords(self, omega: Array) -> Array:
+    def _alg_to_coords(self, omega: Array) -> FrameCoords:
         if omega.shape != self.state_shape:
             raise ValueError(
                 f"{type(self).__name__} Lie algebra matrix must have shape {self.state_shape}; got {omega.shape}."
@@ -61,16 +61,19 @@ class SO(Manifold["SO"]):
         omega = 0.5 * (omega - omega.T)
         return omega[self._upper_i, self._upper_j]
 
-    def trivialise(self, x: Array, v: Array) -> Array:
+    def trivialise(self, x: StateMatrix, v: StateMatrix) -> FrameCoords:
         self.check_state_shape(x)
         self.check_state_shape(v)
         return self._alg_to_coords(x.T @ v)
 
-    def detrivialise(self, x: Array, a: Array) -> Array:
+    def detrivialise(self, x: StateMatrix, a: FrameCoords) -> StateMatrix:
         self.check_state_shape(x)
-        return x @ self._coords_to_alg(a, dtype=x.dtype)
+        return x @ self._coords_to_alg(a)
 
-    def frame_bracket(self, a: Array, b: Array) -> Array:
+    def frame_bracket(
+        self, x: StateMatrix, a: FrameCoords, b: FrameCoords
+    ) -> FrameCoords:
+        del x
         omega_a = self._coords_to_alg(a)
         omega_b = self._coords_to_alg(b)
         return self._alg_to_coords(omega_a @ omega_b - omega_b @ omega_a)

@@ -9,7 +9,7 @@ from ._charts import (
     SPDChart,
     _sym,
 )
-from .base import Manifold
+from .base import FrameCoords, Manifold, StateMatrix
 
 __all__ = ["SPD"]
 
@@ -65,7 +65,7 @@ class SPD(Manifold["SPD"]):
     def coordinate_shape(self) -> tuple[int]:
         return (self.n * (self.n + 1) // 2,)
 
-    def _coords_to_sym(self, a: Array) -> Array:
+    def _coords_to_sym(self, a: FrameCoords) -> Array:
         self.check_coordinate_shape(a)
         coeffs = jnp.asarray(a)
         tangent = jnp.zeros((self.n, self.n), dtype=coeffs.dtype)
@@ -77,7 +77,7 @@ class SPD(Manifold["SPD"]):
             tangent = tangent.at[self._upper_j, self._upper_i].set(off_diag)
         return tangent
 
-    def _sym_to_coords(self, tangent: Array) -> Array:
+    def _sym_to_coords(self, tangent: Array) -> FrameCoords:
         if tangent.shape != self.state_shape:
             raise ValueError(
                 f"{type(self).__name__} symmetric matrix must have shape {self.state_shape}; got {tangent.shape}."
@@ -88,7 +88,7 @@ class SPD(Manifold["SPD"]):
         off_diag = sqrt_two * tangent[self._upper_i, self._upper_j]
         return jnp.concatenate((diag, off_diag))
 
-    def trivialise(self, x: Array, v: Array) -> Array:
+    def trivialise(self, x: StateMatrix, v: StateMatrix) -> FrameCoords:
         self.check_state_shape(x)
         self.check_state_shape(v)
         eigvals, eigvecs = jnp.linalg.eigh(_sym(x))
@@ -96,13 +96,16 @@ class SPD(Manifold["SPD"]):
         local_a = local_v / (eigvals[:, None] + eigvals[None, :])
         return self._sym_to_coords(eigvecs @ local_a @ eigvecs.T)
 
-    def detrivialise(self, x: Array, a: Array) -> Array:
+    def detrivialise(self, x: StateMatrix, a: FrameCoords) -> StateMatrix:
         self.check_state_shape(x)
         lift = self._coords_to_sym(a)
         return lift @ x + x @ lift
 
-    def frame_bracket(self, a: Array, b: Array) -> Array:
-        del a, b
-        raise NotImplementedError(
-            "SPD frame coordinates are not closed under commutator."
-        )
+    def frame_bracket(
+        self, x: StateMatrix, a: FrameCoords, b: FrameCoords
+    ) -> FrameCoords:
+        self.check_state_shape(x)
+        lift_a = self._coords_to_sym(a)
+        lift_b = self._coords_to_sym(b)
+        skew = lift_a @ lift_b - lift_b @ lift_a
+        return self.trivialise(x, x @ skew - skew @ x)

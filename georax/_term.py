@@ -58,8 +58,7 @@ def find_geometry(terms: AbstractTerm) -> Manifold[Any]:
             if isinstance(child, GeometricTerm):
                 return child.geometry
     raise TypeError(
-        "Expected a GeometricTerm, or a MultiTerm containing a GeometricTerm; "
-        f"got {type(base).__name__}."
+        f"Expected a GeometricTerm, or a MultiTerm containing a GeometricTerm; got {type(base).__name__}."
     )
 
 
