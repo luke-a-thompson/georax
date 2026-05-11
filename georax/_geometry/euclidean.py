@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import jax.numpy as jnp
-from diffrax._custom_types import RealScalarLike
 from jaxtyping import Array
 
 from .base import FrameCoords, LocalChart, Manifold, StateMatrix
 
 
 class EuclideanChart(LocalChart["Euclidean"]):
-    order: RealScalarLike
-    inverse_order: RealScalarLike
+    order: int
 
     def __init__(self, order: int):
         del order
         object.__setattr__(self, "order", 12)
-        object.__setattr__(self, "inverse_order", 12)
 
     def apply(self, x: Array, a: FrameCoords, geometry: Euclidean) -> Array:
         del geometry
@@ -28,7 +25,7 @@ class EuclideanChart(LocalChart["Euclidean"]):
 
 
 class Euclidean(Manifold["Euclidean"]):
-    """R^n with the standard frame, addition retraction, and exact chart."""
+    """R^n with the standard frame and addition retraction."""
 
     _chart_class = EuclideanChart
 

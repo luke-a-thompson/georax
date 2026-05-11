@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import Any, ClassVar, Generic, Literal, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar
 
 import equinox as eqx
 import jax
 from diffrax._custom_types import RealScalarLike
 from jaxtyping import Array, Num
 
-chart_order = int | Literal["exact"]
 Geometry = TypeVar("Geometry", bound="Manifold[Any]")
 CoeffField = Callable[[Array], Array]
 FrameCoords = Num[Array, "{self.coordinate_shape[0]}"]
@@ -18,7 +17,6 @@ StateMatrix = Num[Array, "{self.state_shape[0]} {self.state_shape[1]}"]
 
 class LocalChart(eqx.Module, Generic[Geometry]):
     order: RealScalarLike
-    inverse_order: RealScalarLike
 
     @abstractmethod
     def apply(self, x: Array, a: Array, geometry: Geometry) -> Array:

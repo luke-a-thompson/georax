@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, override
+from typing import Any, override, TypeVar
 
 import equinox as eqx
-from diffrax import AbstractTerm, MultiTerm
+from diffrax import AbstractSolver, AbstractTerm, MultiTerm
 from diffrax._custom_types import Args, RealScalarLike, Y
 from diffrax._term import WrapTerm
 from jaxtyping import Array
 
 from georax._geometry import Manifold
+
+_SolverState = TypeVar("_SolverState")
 
 
 class GeometricTerm(AbstractTerm[Array, RealScalarLike]):
@@ -62,7 +64,9 @@ def find_geometry(terms: AbstractTerm) -> Manifold[Any]:
     )
 
 
-def select_chart_for_solver(solver, geometry: Manifold[Any]) -> None:
+def select_chart_for_solver(
+    solver: AbstractSolver[_SolverState], geometry: Manifold[Any]
+) -> None:
     """Select a chart based on the highest order the solver may need."""
     orders = [
         getattr(solver, name, lambda _: None)(geometry)

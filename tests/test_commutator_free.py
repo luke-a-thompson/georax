@@ -46,8 +46,7 @@ class AffineRetractionOps(Manifold["AffineRetractionOps"]):
 
 
 class _AffineRetractionChart(LocalChart[AffineRetractionOps]):
-    order: int | str = "exact"
-    inverse_order: int | str = "exact"
+    order: int = 12
 
     def apply(self, x: Array, a: Array, geometry: AffineRetractionOps) -> Array:
         return geometry.scale * x + a

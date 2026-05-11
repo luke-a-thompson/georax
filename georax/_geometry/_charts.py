@@ -4,7 +4,6 @@ import math
 from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
-from diffrax._custom_types import RealScalarLike
 from jaxtyping import Array
 
 from .base import LocalChart
@@ -115,25 +114,20 @@ def _cayley(a: Array) -> Array:
 class SOChart(LocalChart["SO"]):
     """SO(n) chart using Cayley at order 2 and Taylor+QR at higher orders."""
 
-    order: RealScalarLike
-    inverse_order: RealScalarLike
-    degree: int
+    order: int
 
     def __init__(self, order: int):
-        order = int(order)
-        degree = max(2, order)
-        if degree % 2:
-            degree += 1
-        object.__setattr__(self, "order", order)
-        object.__setattr__(self, "inverse_order", order)
-        object.__setattr__(self, "degree", degree)
+        object.__setattr__(self, "order", int(order))
 
     def apply(self, x: Array, a: Array, geometry: SO) -> Array:
         omega = geometry._coords_to_alg(a)
         if self.order <= 2:
             return x @ _cayley(omega)
 
-        g = _taylor_expm(omega, self.degree)
+        degree = max(2, self.order)
+        if degree % 2:
+            degree += 1
+        g = _taylor_expm(omega, degree)
         q, r = jnp.linalg.qr(g)
         q = q * jnp.sign(jnp.diag(r))
         return x @ q
@@ -157,21 +151,16 @@ class SOChart(LocalChart["SO"]):
 
 
 class SPDChart(LocalChart["SPD"]):
-    order: RealScalarLike
-    inverse_order: RealScalarLike
-    degree: int
+    order: int
 
     def __init__(self, order: int):
-        order = int(order)
-        degree = max(2, order)
-        if degree % 2:
-            degree += 1
-        object.__setattr__(self, "order", order)
-        object.__setattr__(self, "inverse_order", order)
-        object.__setattr__(self, "degree", degree)
+        object.__setattr__(self, "order", int(order))
 
     def apply(self, x: Array, a: Array, geometry: SPD) -> Array:
         x = _sym(jnp.asarray(x))
         lift = geometry._coords_to_sym(a)
-        g = _taylor_expm(lift, self.degree)
+        degree = max(2, self.order)
+        if degree % 2:
+            degree += 1
+        g = _taylor_expm(lift, degree)
         return g @ x @ g.T
