@@ -14,95 +14,14 @@ from diffrax._solver.srk import (
     GeneralCoeffs,
     StochasticButcherTableau,
 )
-from jaxtyping import Array
 
 from georax._term import (
     GeometricTerm,
-    find_geometry,
+    PulledDiffusionTerm,
+    PulledDriftTerm,
     select_chart_for_solver,
     unwrap_term,
 )
-
-
-class _PulledDriftTerm(AbstractTerm[Array, RealScalarLike]):
-    """Local Lie-algebra drift induced by a manifold drift term."""
-
-    drift_term: GeometricTerm
-    y_anchor: Y
-
-    @override
-    def vf(self, t: RealScalarLike, omega: Array, args: Args) -> Array:
-        geometry = self.drift_term.geometry
-        chart = geometry.chart
-        if chart is None:
-            raise TypeError("SRKMK requires a geometry with a selected chart.")
-
-        y = geometry.apply_increment(self.y_anchor, omega)
-        raw = self.drift_term.vf(t, y, args)
-        return chart.inverse_differential(self.y_anchor, omega, raw, geometry)
-
-    @override
-    def contr(self, t0: RealScalarLike, t1: RealScalarLike, **kwargs):
-        del kwargs
-        return t1 - t0
-
-    @override
-    def prod(self, vf: Array, control: RealScalarLike) -> Array:
-        return vf * control
-
-
-class _PulledDiffusionTerm(AbstractTerm[VF, object]):
-    """Local Lie-algebra diffusion induced by an arbitrary Diffrax term.
-
-    The underlying term still owns the vector-field/control product via
-    ``prod``. We intentionally do not call its ``vf_prod``: Diffrax's
-    ``ControlTerm.vf_prod`` validates against the manifold state shape, whereas
-    georax diffusion terms return frame-coordinate data.
-    """
-
-    drift_term: GeometricTerm
-    diffusion_term: AbstractTerm
-    y_anchor: Y
-    omega0: Array
-
-    @override
-    def vf(self, t: RealScalarLike, omega: Array, args: Args) -> VF:
-        y = self.drift_term.geometry.apply_increment(self.y_anchor, omega)
-        return self.diffusion_term.vf(t, y, args)
-
-    @override
-    def contr(self, t0: RealScalarLike, t1: RealScalarLike, **kwargs):
-        return self.diffusion_term.contr(t0, t1, **kwargs)
-
-    @override
-    def prod(self, vf: VF, control: object) -> Array:
-        geometry = self.drift_term.geometry
-        chart = geometry.chart
-        if chart is None:
-            raise TypeError("SRKMK requires a geometry with a selected chart.")
-
-        raw_increment = self.diffusion_term.prod(vf, control)
-        return chart.inverse_differential(
-            self.y_anchor, self.omega0, raw_increment, geometry
-        )
-
-    @override
-    def vf_prod(
-        self,
-        t: RealScalarLike,
-        omega: Array,
-        args: Args,
-        control: object,
-    ) -> Array:
-        geometry = self.drift_term.geometry
-        chart = geometry.chart
-        if chart is None:
-            raise TypeError("SRKMK requires a geometry with a selected chart.")
-
-        y = geometry.apply_increment(self.y_anchor, omega)
-        raw_vf = self.diffusion_term.vf(t, y, args)
-        raw_increment = self.diffusion_term.prod(raw_vf, control)
-        return chart.inverse_differential(self.y_anchor, omega, raw_increment, geometry)
 
 
 class SRKMK(AbstractWrappedSolver):
@@ -220,10 +139,12 @@ class SRKMK(AbstractWrappedSolver):
         # diffusion is independent of the algebra state — i.e. it catches a
         # false ``additive_after_pullback=True`` claim. For general tableaus
         # AbstractSRK.init is a no-op.
-        omega0 = jnp.zeros_like(drift_term.vf(t0, y0, args))
+        omega0 = jnp.zeros(
+            drift_term.geometry.coordinate_shape, dtype=jnp.result_type(y0)
+        )
         algebra_terms = MultiTerm(
-            _PulledDriftTerm(drift_term, y0),
-            _PulledDiffusionTerm(drift_term, diffusion_term, y0, omega0),
+            PulledDriftTerm(drift_term, y0),
+            PulledDiffusionTerm(drift_term, diffusion_term, y0, omega0),
         )
         self.solver.init(algebra_terms, t0, t1, omega0, args)
         return None
@@ -253,15 +174,15 @@ class SRKMK(AbstractWrappedSolver):
         del solver_state
 
         drift_term, diffusion_term = self._split_terms(terms)
-        geometry = find_geometry(terms)
+        geometry = drift_term.geometry
         chart = geometry.chart
         if chart is None:
             raise TypeError("SRKMK requires a geometry with a selected chart.")
 
-        omega0 = jnp.zeros_like(drift_term.vf(t0, y0, args))
+        omega0 = jnp.zeros(geometry.coordinate_shape, dtype=jnp.result_type(y0))
         algebra_terms = MultiTerm(
-            _PulledDriftTerm(drift_term, y0),
-            _PulledDiffusionTerm(drift_term, diffusion_term, y0, omega0),
+            PulledDriftTerm(drift_term, y0),
+            PulledDiffusionTerm(drift_term, diffusion_term, y0, omega0),
         )
 
         omega1, omega_error, _, _, result = self.solver.step(

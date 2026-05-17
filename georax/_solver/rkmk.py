@@ -4,40 +4,19 @@ from typing import override
 
 import equinox as eqx
 import jax.numpy as jnp
-from diffrax import RESULTS, AbstractTerm
+from diffrax import RESULTS
 from diffrax._custom_types import VF, Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
 from diffrax._local_interpolation import LocalLinearInterpolation
 from diffrax._solver.base import AbstractSolver, AbstractWrappedSolver
 from diffrax._solver.runge_kutta import AbstractERK
-from jaxtyping import Array
 
-from georax._term import GeometricTerm, find_geometry, select_chart_for_solver
-
-
-class _PulledTerm(AbstractTerm[Array, RealScalarLike]):
-    """Lie-algebra pullback of a manifold drift term anchored at ``y_anchor``."""
-
-    drift_term: GeometricTerm
-    y_anchor: Y
-
-    @override
-    def vf(self, t: RealScalarLike, omega: Array, args: Args) -> Array:
-        geometry = self.drift_term.geometry
-        chart = geometry.chart
-        if chart is None:
-            raise TypeError("RKMK requires a geometry with a selected chart.")
-        y = geometry.apply_increment(self.y_anchor, omega)
-        raw = self.drift_term.vf(t, y, args)
-        return chart.inverse_differential(self.y_anchor, omega, raw, geometry)
-
-    @override
-    def contr(self, t0: RealScalarLike, t1: RealScalarLike, **kwargs) -> RealScalarLike:
-        del kwargs
-        return t1 - t0
-
-    @override
-    def prod(self, vf: Array, control: RealScalarLike) -> Array:
-        return vf * control
+from georax._term import (
+    GeometricTerm,
+    PulledDriftTerm,
+    find_geometry,
+    select_chart_for_solver,
+    unwrap_term,
+)
 
 
 class RKMK(AbstractWrappedSolver):
@@ -109,12 +88,13 @@ class RKMK(AbstractWrappedSolver):
     ) -> tuple[Y, Y | None, DenseInfo, None, RESULTS]:
         del solver_state
 
-        geometry = find_geometry(terms)
-        if geometry.chart is None:
-            raise TypeError("RKMK requires a GeometricTerm geometry with a chart.")
+        base_term = unwrap_term(terms)
+        if not isinstance(base_term, GeometricTerm):
+            raise TypeError("RKMK requires a geometric drift term.")
+        geometry = base_term.geometry
 
-        algebra_term = _PulledTerm(terms, y0)
-        omega0 = jnp.zeros_like(terms.vf(t0, y0, args))
+        algebra_term = PulledDriftTerm(base_term, y0)
+        omega0 = jnp.zeros(geometry.coordinate_shape, dtype=jnp.result_type(y0))
 
         omega1, omega_error, _, _, result = self.solver.step(
             algebra_term,
