@@ -134,9 +134,7 @@ class SOChart(LocalChart["SO"]):
 
     def inverse_differential(self, x: Array, a: Array, b: Array, geometry: SO) -> Array:
         if self.order > 2:
-            raise NotImplementedError(
-                "SOChart only implements inverse_differential for the order-2 Cayley chart."
-            )
+            return super().inverse_differential(x, a, b, geometry)
         del x
         omega = geometry._coords_to_alg(a)
         eta = geometry._coords_to_alg(b)

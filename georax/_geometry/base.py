@@ -6,7 +6,9 @@ from typing import Any, ClassVar, Generic, TypeVar
 
 import equinox as eqx
 import jax
+import jax.numpy as jnp
 from diffrax._custom_types import RealScalarLike
+from jax.flatten_util import ravel_pytree
 from jaxtyping import Array, Num
 
 Geometry = TypeVar("Geometry", bound="Manifold[Any]")
@@ -27,9 +29,21 @@ class LocalChart(eqx.Module, Generic[Geometry]):
         self, x: Array, a: Array, b: Array, geometry: Geometry
     ) -> Array:
         """Apply the inverse differential of ``a -> apply(x, a, geometry)``."""
-        raise NotImplementedError(
-            f"{type(self).__name__} does not implement inverse_differential."
-        )
+        y, pushforward = jax.linearize(lambda aa: self.apply(x, aa, geometry), a)
+        a_flat, unravel = ravel_pytree(a)
+        b_flat, _ = ravel_pytree(b)
+        basis = jnp.eye(a_flat.size, dtype=a_flat.dtype)
+
+        def apply_column(e):
+            da = unravel(e)
+            ambient_tangent = pushforward(da)
+            frame_tangent = geometry.trivialise(y, ambient_tangent)
+            frame_flat, _ = ravel_pytree(frame_tangent)
+            return frame_flat
+
+        jac = jax.vmap(apply_column)(basis).T
+        out_flat = jnp.linalg.solve(jac, b_flat)
+        return unravel(out_flat)
 
 
 class Manifold(eqx.Module, Generic[Geometry]):
