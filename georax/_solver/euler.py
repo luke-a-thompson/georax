@@ -15,6 +15,18 @@ class GeometricEuler(AbstractItoSolver):
 
     For SDE terms this is Euler--Maruyama: the full Diffrax term increment is
     evaluated at the left endpoint, then applied via the manifold chart.
+
+    ??? Reference
+
+        ```bibtex
+        @book{KloedenPlaten1992,
+          title = {Numerical Solution of Stochastic Differential Equations},
+          author = {Kloeden, Peter E. and Platen, Eckhard},
+          publisher = {Springer},
+          year = {1992},
+          doi = {10.1007/978-3-662-12616-5}
+        }
+        ```
     """
 
     term_structure: ClassVar = AbstractTerm

@@ -1,28 +1,34 @@
-# georax
+<p align="center">
+  <picture>
+    <source srcset="https://raw.githubusercontent.com/luke-a-thompson/georax/main/docs/_static/georax.dark.svg" media="(prefers-color-scheme: dark)">
+    <source srcset="https://raw.githubusercontent.com/luke-a-thompson/georax/main/docs/_static/georax.light.svg" media="(prefers-color-scheme: light)">
+    <img src="https://raw.githubusercontent.com/luke-a-thompson/georax/main/docs/_static/georax.light.svg" width="350" alt="Logo">
+  </picture>
+</p>
 
-Geometric ODE solvers for [Diffrax](https://github.com/patrick-kidger/diffrax), focused on Lie-group and manifold integration.
+<h2 align='center'>Geometric ODE and SDE solvers for Diffrax.</h2>
 
-## RKMK
+## Solvers
 
-`RKMK` wraps an explicit Diffrax Runge-Kutta solver and lifts it to geometric integration on a `GeometricTerm`.
-It reuses the wrapped solver's Runge-Kutta coefficients, so you choose accuracy/adaptivity by choosing the base solver.
+| Class | Problem type | Order | Automatic stepsizing | Notes |
+|-------|--------------|-------|----------------------|-------|
+| `GeometricEuler` | ODE/SDE | 1 ODE, 0.5 strong SDE | No | Euler and Euler-Maruyama update through a manifold chart |
+| `RKMK(base_solver)` | ODE | base solver order | base solver dependent | Runge-Kutta-Munthe-Kaas lift of an explicit Diffrax RK solver |
+| `SRKMK(base_solver)` | SDE | base solver dependent | base solver dependent | Stochastic Runge-Kutta-Munthe-Kaas lift of a Diffrax SRK solver |
+| `CG2` | ODE/SDE | 2 | No | 2-stage Crouch-Grossman commutator-free method |
+| `CG4` | ODE/SDE | 4 | No | 5-stage Crouch-Grossman commutator-free method |
+| `CFEES25` | ODE/SDE | 2 | Yes | `CF-EES(2,5;1/10)`, O(1)-reversible, Stratonovich, 2N low-storage recurrence |
+| `CFEES27` | ODE/SDE | 2 | No | `CF-EES(2,7;(5 - 3*sqrt(2))/14)`, O(1)-reversible, Stratonovich, 2N low-storage recurrence |
 
-- Wrap a fixed-step ERK (for example `Heun()`) for fixed-step geometric integration.
-- Wrap an adaptive ERK (for example `Dopri5()`) to keep automatic stepsizing.
+## Geometries
 
-## Commutator-Free Solvers
+| Class | State | Coordinates | Chart |
+|-------|-------|-------------|-------|
+| `Euclidean()` | Any array | Same as state | Addition |
+| `SO(n)` | `(n, n)` rotation matrix | `n * (n - 1) // 2` skew coordinates | Cayley at order 2, Taylor+QR at higher orders |
+| `SPD(n)` | `(n, n)` symmetric positive-definite matrix | `n * (n + 1) // 2` symmetric coordinates | Congruence action via truncated exponential |
 
-| Class | Stages | Order | Automatic stepsizing | Notes |
-|-------|--------|-------|----------------------|-------|
-| `CG2` | 2 | 2 | No | - |
-| `CG4` | 5 | 4 | No | - |
-| `CFEES25` | 3 | 2 | Yes | 2N low-storage recurrence |
-| `CFEES27` | 3 | 2 | No | 2N low-storage recurrence |
-
-## Understanding Geometric Integration
-1. Start with a state in the group: $g_t \in G$
-1. Vector fields return a velocity $\zeta \in \mathfrak{g}$, an element of the Lie algebra
-1. The finite update is $g_{t+1} = g_t \exp(h\omega)$, where $\exp$ maps the Lie algebra element $h\omega$ to a group element
+`GeometricTerm` is intrinsic: its vector field returns frame or Lie-algebra coordinates, not an ambient tangent matrix.
 
 ## Usage
 
@@ -31,33 +37,70 @@ import diffrax
 import jax.numpy as jnp
 from georax import CFEES25, GeometricTerm, RKMK, SO
 
-# Create a toy SO(3) vector field
+
 def coeffs(t, y, args):
-    del t, args
+    del t, y, args
     return jnp.array([-1.0, 0.0, 0.0])
 
-# Georax terms are intrinsic: coeffs returns frame/Lie-algebra coordinates.
+
 term = GeometricTerm(coeffs, geometry=SO(3))
+solvers = (RKMK(diffrax.Heun()), CFEES25())
 
-# Wrap a base Diffrax solver to work on a Lie group, or use a specialized manifold solver.
-solvers = (RKMK(diffrax.Dopri5()), CFEES25())
-
-# Then solve, with all intermediate steps on the manifold!
 for solver in solvers:
     sol = diffrax.diffeqsolve(
         term,
         solver,
-        t0=0.0, t1=1.0, dt0=0.01, y0=jnp.eye(3),
+        t0=0.0,
+        t1=1.0,
+        dt0=0.01,
+        y0=jnp.eye(3),
     )
 ```
+
+For stochastic problems, use `GeometricEuler()` directly or wrap a Diffrax stochastic Runge-Kutta method with `SRKMK(...)`. Diffusion terms should return frame-coordinate coefficients compatible with the geometry.
+
+`CFEES25` and `CFEES27` also work directly with SDE `MultiTerm`s. They are Stratonovich solvers, so the supplied drift and diffusion should describe the Stratonovich SDE in frame coordinates.
 
 ## Install
 
 ```bash
-uv sync
+pip install georax
 ```
 
-## Benchmarking
+For development:
+
 ```bash
-uv run pytest tests/test_benchmarks.py -m benchmark -k 'test_solvers_runtime or test_solvers_grad_runtime' -s
+uv sync --extra dev
+```
+
+## Limitations
+
+`RKMK` requires the selected chart to implement the inverse differential needed by the wrapped solver. The current `SO(n)` chart implements this for the order-2 Cayley chart, so `RKMK(diffrax.Heun())` is supported; higher-order adaptive `RKMK` on `SO(n)` needs additional chart support.
+
+`CFEES25` and `CFEES27` are the commutator-free EES schemes from Shmelev, Thompson, and Salvi. They support both ODEs and SDEs, are O(1)-reversible, and converge to the Stratonovich solution for SDEs. The `CFEES25` coefficients correspond to `EES(2,5;1/10)`.
+
+## Citation
+
+If you use georax, please cite:
+
+```bibtex
+@article{ShmelevThompsonSalvi2025,
+  title = {Explicit and Effectively Symmetric Schemes for Neural SDEs on Lie Groups},
+  author = {Shmelev, Daniil and Thompson, Luke and Salvi, Cristopher},
+  year = {2025},
+  doi = {10.48550/arXiv.2509.20599},
+  url = {https://arxiv.org/abs/2509.20599}
+}
+```
+
+Core numerical references:
+
+- Crouch and Grossman (1993), "Numerical integration of ordinary differential equations on manifolds", doi: `10.1007/BF02429858`.
+- Munthe-Kaas (1998), "Runge-Kutta methods on Lie groups", doi: `10.1007/BF02510919`.
+- Bazavov (2022), "Commutator-free Lie group methods with minimum storage requirements and reuse of exponentials", doi: `10.1007/s10543-021-00892-x`.
+
+## Benchmarking
+
+```bash
+uv run pytest tests/benchmarks -m benchmark -k 'test_runtime or test_grad_runtime' -s
 ```

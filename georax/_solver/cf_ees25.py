@@ -3,30 +3,48 @@ from __future__ import annotations
 from typing import ClassVar, override
 
 import numpy as np
-from diffrax import RESULTS, AbstractReversibleSolver, AbstractTerm
+from diffrax import (
+    RESULTS,
+    AbstractReversibleSolver,
+    AbstractStratonovichSolver,
+    AbstractTerm,
+)
 from diffrax._custom_types import Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
 from diffrax_lowstorage import LowStorageRecurrence
 from jaxtyping import PyTree
 
 from georax._solver.commutator_free import AbstractLowStorageCommutatorFreeSolver
 from georax._term import GeometricTerm
+from diffrax_lowstorage.ees25 import _ees25_recurrence
 
-_cf_ees25_recurrence = LowStorageRecurrence(
-    A=np.array([-7 / 15, -35 / 32]),
-    B=np.array([1 / 3, 15 / 16, 2 / 5]),
-    C=np.array([0.0, 1 / 3, 5 / 6]),
-)
+_cf_ees25_recurrence = _ees25_recurrence
 
 _cf_ees25_embedded_penultimate_exps = (np.array([5 / 48, 1 / 16, 0.0]),)
 
 _SolverState = Y
 
 
-class CFEES25(AbstractLowStorageCommutatorFreeSolver, AbstractReversibleSolver):
-    """Commutator-free EES(2,5;1/10) solver with chained exponentials.
+class CFEES25(
+    AbstractLowStorageCommutatorFreeSolver,
+    AbstractReversibleSolver,
+    AbstractStratonovichSolver,
+):
+    """Commutator-free EES(2,5;1/10) solver.
 
-    Reference:
-        Unpublished work.
+    Supports ODEs and SDEs. For SDEs, this converges to the Stratonovich
+    solution. O(1)-reversible and uses minimal memory and exponential count.
+
+    ??? Reference
+
+        ```bibtex
+        @article{ShmelevThompsonSalvi2025,
+          title = {Explicit and Effectively Symmetric Schemes for Neural SDEs on Lie Groups},
+          author = {Shmelev, Daniil and Thompson, Luke and Salvi, Cristopher},
+          year = {2025},
+          doi = {10.48550/arXiv.2509.20599},
+          url = {https://arxiv.org/abs/2509.20599}
+        }
+        ```
     """
 
     recurrence: ClassVar[LowStorageRecurrence] = _cf_ees25_recurrence
@@ -50,6 +68,10 @@ class CFEES25(AbstractLowStorageCommutatorFreeSolver, AbstractReversibleSolver):
     def order(self, terms: GeometricTerm) -> int:
         del terms
         return 2
+
+    def strong_order(self, terms):
+        del terms
+        return 0.5
 
     def antisymmetric_order(self, terms):
         del terms

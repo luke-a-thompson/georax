@@ -36,6 +36,20 @@ class SRKMK(AbstractWrappedSolver):
     Diffrax's current ``AbstractSRK`` methods are Stratonovich methods; Itô
     Magnus drift corrections must be included in the supplied drift term or in a
     dedicated Itô SRK implementation.
+
+    ??? Reference
+
+        ```bibtex
+        @article{MunizEhrhardtGuentherWinkler2023,
+          title = {Strong stochastic Runge-Kutta-Munthe-Kaas methods for nonlinear Ito SDEs on manifolds},
+          author = {Muniz, Michelle and Ehrhardt, Matthias and Guenther, Michael and Winkler, Renate},
+          journal = {Applied Numerical Mathematics},
+          volume = {193},
+          pages = {196--203},
+          year = {2023},
+          doi = {10.1016/j.apnum.2023.07.024}
+        }
+        ```
     """
 
     solver: AbstractSolver = eqx.field(static=True)

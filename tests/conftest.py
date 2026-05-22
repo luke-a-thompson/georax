@@ -16,7 +16,7 @@ from georax import CFEES25, CFEES27, CG2, CG4, SO, Euclidean, GeometricTerm, SRK
 
 SOLVERS = [
     ("cg2", CG2),
-    # ("cg4", CG4),
+    ("cg4", CG4),
     ("cfees25", CFEES25),
     ("cfees27", CFEES27),
 ]
@@ -80,7 +80,7 @@ def make_solver_accuracy_term() -> GeometricTerm:
 def make_solver_accuracy_ambient_term() -> ODETerm:
     def vf(t: RealScalarLike, R: Array, args: Args) -> Array:
         del args
-        return R @ _SO3_GEOMETRY._coords_to_alg(so3_body_frame_coeffs(t), dtype=R.dtype)
+        return R @ _SO3_GEOMETRY._coords_to_alg(so3_body_frame_coeffs(t))
 
     return diffrax.ODETerm(vf)
 

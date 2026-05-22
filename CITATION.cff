@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use georax, please cite the preferred citation below."
+title: "georax"
+version: 0.1.0
+date-released: 2026-05-23
+type: software
+repository-code: "https://github.com/luke-a-thompson/georax"
+abstract: "Geometric ODE and SDE solvers for Diffrax."
+authors:
+  - family-names: Thompson
+    given-names: Luke
+preferred-citation:
+  type: article
+  title: "Explicit and Effectively Symmetric Schemes for Neural SDEs on Lie Groups"
+  authors:
+    - family-names: Shmelev
+      given-names: Daniil
+    - family-names: Thompson
+      given-names: Luke
+    - family-names: Salvi
+      given-names: Cristopher
+  year: 2025
+  doi: "10.48550/arXiv.2509.20599"
+  url: "https://arxiv.org/abs/2509.20599"
+  identifiers:
+    - type: other
+      value: "arXiv:2509.20599"
+      description: "arXiv identifier"

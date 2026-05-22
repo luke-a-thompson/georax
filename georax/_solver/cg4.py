@@ -46,7 +46,23 @@ _cg4_tableau = CommutatorFreeTableau(
 
 
 class CG4(AbstractCommutatorFreeSolver):
-    """Crouch-Grossman order-4 solver."""
+    """Crouch-Grossman order-4 solver.
+
+    ??? Reference
+
+        ```bibtex
+        @article{CrouchGrossman1993,
+          title = {Numerical integration of ordinary differential equations on manifolds},
+          author = {Crouch, P. E. and Grossman, R.},
+          journal = {Journal of Nonlinear Science},
+          volume = {3},
+          number = {1},
+          pages = {1--33},
+          year = {1993},
+          doi = {10.1007/BF02429858}
+        }
+        ```
+    """
 
     tableau: ClassVar[CommutatorFreeTableau] = _cg4_tableau
 

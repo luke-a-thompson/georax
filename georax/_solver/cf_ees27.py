@@ -3,30 +3,47 @@ from __future__ import annotations
 from typing import ClassVar, override
 
 import numpy as np
-from diffrax import RESULTS, AbstractReversibleSolver, AbstractTerm
+from diffrax import (
+    RESULTS,
+    AbstractReversibleSolver,
+    AbstractStratonovichSolver,
+    AbstractTerm,
+)
 from diffrax._custom_types import Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
 from diffrax_lowstorage import LowStorageRecurrence
 from jaxtyping import PyTree
 
 from georax._solver.commutator_free import AbstractLowStorageCommutatorFreeSolver
 from georax._term import GeometricTerm
+from diffrax_lowstorage.ees27 import _ees27_recurrence
 
-_s2 = np.sqrt(2.0)
 
-_cf_ees27_recurrence = LowStorageRecurrence(
-    A=np.array([(-7 + 4 * _s2) / 3, -(4 + 5 * _s2) / 12, 3 * (-31 + 8 * _s2) / 49]),
-    B=np.array([(2 - _s2) / 3, (4 + _s2) / 8, 3 * (3 - _s2) / 7, (9 - 4 * _s2) / 14]),
-    C=np.array([0.0, (2 - _s2) / 3, (2 + _s2) / 6, (4 + _s2) / 6]),
-)
+_cf_ees27_recurrence = _ees27_recurrence
 
 _SolverState = Y
 
 
-class CFEES27(AbstractLowStorageCommutatorFreeSolver, AbstractReversibleSolver):
-    """Commutator-free EES(2,7;1/4) solver with chained exponentials.
+class CFEES27(
+    AbstractLowStorageCommutatorFreeSolver,
+    AbstractReversibleSolver,
+    AbstractStratonovichSolver,
+):
+    """Commutator-free EES(2,7;(5 - 3*sqrt(2))/14) solver.
 
-    Reference:
-        Unpublished work.
+    Supports ODEs and SDEs. For SDEs, this converges to the Stratonovich
+    solution. O(1)-reversible and uses minimal memory and exponential count.
+
+    ??? Reference
+
+        ```bibtex
+        @article{ShmelevThompsonSalvi2025,
+          title = {Explicit and Effectively Symmetric Schemes for Neural SDEs on Lie Groups},
+          author = {Shmelev, Daniil and Thompson, Luke and Salvi, Cristopher},
+          year = {2025},
+          doi = {10.48550/arXiv.2509.20599},
+          url = {https://arxiv.org/abs/2509.20599}
+        }
+        ```
     """
 
     recurrence: ClassVar[LowStorageRecurrence] = _cf_ees27_recurrence
@@ -47,6 +64,10 @@ class CFEES27(AbstractLowStorageCommutatorFreeSolver, AbstractReversibleSolver):
     def order(self, terms: GeometricTerm) -> int:
         del terms
         return 2
+
+    def strong_order(self, terms):
+        del terms
+        return 0.5
 
     def antisymmetric_order(self, terms):
         del terms

@@ -25,6 +25,21 @@ class RKMK(AbstractWrappedSolver):
     The drift vector field is pulled back to the Lie algebra of the geometry's
     selected chart and integrated by the wrapped ERK starting from ``omega = 0``.
     The resulting algebra increment is retracted onto the manifold once.
+
+    ??? Reference
+
+        ```bibtex
+        @article{MuntheKaas1998,
+          title = {Runge-Kutta methods on Lie groups},
+          author = {Munthe-Kaas, Hans},
+          journal = {BIT Numerical Mathematics},
+          volume = {38},
+          number = {1},
+          pages = {92--111},
+          year = {1998},
+          doi = {10.1007/BF02510919}
+        }
+        ```
     """
 
     solver: AbstractSolver = eqx.field(static=True)

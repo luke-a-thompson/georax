@@ -204,8 +204,8 @@ def plot_grid(hs: list[float], output_dir: Path) -> Path:
     solvers = [
         ("CG2", CG2()),
         ("CG4", CG4()),
-        ("CF-EES(2,5;1/4)", CFEES25()),
-        ("CF-EES(2,7;1/4)", CFEES27()),
+        ("CF-EES(2,5;1/10)", CFEES25()),
+        ("CF-EES(2,7;(5-3sqrt(2))/14)", CFEES27()),
     ]
 
     fig, axes = plt.subplots(len(solvers), 2, figsize=(10, 3.2 * len(solvers)))

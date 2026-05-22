@@ -19,7 +19,23 @@ _cg2_tableau = CommutatorFreeTableau(
 
 
 class CG2(AbstractCommutatorFreeSolver):
-    """Crouch-Grossman order-2 solver."""
+    """Crouch-Grossman order-2 solver.
+
+    ??? Reference
+
+        ```bibtex
+        @article{CrouchGrossman1993,
+          title = {Numerical integration of ordinary differential equations on manifolds},
+          author = {Crouch, P. E. and Grossman, R.},
+          journal = {Journal of Nonlinear Science},
+          volume = {3},
+          number = {1},
+          pages = {1--33},
+          year = {1993},
+          doi = {10.1007/BF02429858}
+        }
+        ```
+    """
 
     tableau: ClassVar[CommutatorFreeTableau] = _cg2_tableau
 

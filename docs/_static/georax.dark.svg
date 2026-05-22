@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80" width="320" height="80" role="img" aria-label="georax">
+  <title>georax</title>
+  <defs></defs>
+  
+  <g transform="translate(12, 8)">
+    <circle cx="28" cy="44" r="16" fill="none" stroke="oklch(0.70 0.13 165)" stroke-width="2.6"></circle>
+    <path d="M 12 44 A 16 4 0 0 0 44 44" fill="none" stroke="oklch(0.70 0.13 165)" stroke-width="1.4" opacity="0.55"></path>
+    <path d="M 12 44 A 16 4 0 0 1 44 44" fill="none" stroke="oklch(0.70 0.13 165)" stroke-width="1.2" opacity="0.35" stroke-dasharray="2.5 2"></path>
+    <polygon points="5,35 37,35 51,21 19,21" fill="oklch(0.70 0.13 165)" fill-opacity="0.12" stroke="oklch(0.70 0.13 165)" stroke-width="2.2" stroke-linejoin="round"></polygon>
+    <circle cx="28" cy="28" r="2.8" fill="oklch(0.70 0.13 165)"></circle>
+  </g>
+  <text x="92" y="56" font-family="&#39;Newsreader&#39;, Georgia, serif" font-style="italic" font-weight="500" font-size="44" letter-spacing="-0.01em" fill="#f3efe7">georax</text>
+</svg>
