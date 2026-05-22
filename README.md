@@ -8,6 +8,8 @@
 
 <h2 align='center'>Geometric ODE and SDE solvers for Diffrax.</h2>
 
+Georax provides geometric numerical integrators for the [Diffrax](https://github.com/patrick-kidger/diffrax) ecosystem. Georax supports solving ODEs, SDEs and CDEs over homogeneous spaces and enables efficient training of intrinsic neural differential equations with $\mathcal{O}(1)$ backpropagation via EES methods. RDE support is provided by integration with [Roughrax](https://github.com/luke-a-thompson/roughrax).
+
 ## Solvers
 
 | Class | Problem type | Order | Automatic stepsizing | Notes |
