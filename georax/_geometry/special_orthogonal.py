@@ -19,6 +19,7 @@ class SO(Manifold["SO"]):
     _upper_i: Array
     _upper_j: Array
     _basis: Array
+    _structure_constants: Array
 
     def __init__(self, n: int):
         n = int(n)
@@ -32,10 +33,18 @@ class SO(Manifold["SO"]):
         basis[upper_i, upper_j, k] = 1.0
         basis[upper_j, upper_i, k] = -1.0
 
+        structure = np.zeros((d, d, d), dtype=basis.dtype)
+        for i in range(d):
+            for j in range(d):
+                commutator = basis[:, :, i] @ basis[:, :, j]
+                commutator -= basis[:, :, j] @ basis[:, :, i]
+                structure[:, i, j] = commutator[upper_i, upper_j]
+
         object.__setattr__(self, "n", n)
         object.__setattr__(self, "_upper_i", jnp.asarray(upper_i))
         object.__setattr__(self, "_upper_j", jnp.asarray(upper_j))
         object.__setattr__(self, "_basis", jnp.asarray(basis))
+        object.__setattr__(self, "_structure_constants", jnp.asarray(structure))
 
     @property
     def state_shape(self) -> tuple[int, int]:
@@ -74,6 +83,4 @@ class SO(Manifold["SO"]):
         self, x: StateMatrix, a: FrameCoords, b: FrameCoords
     ) -> FrameCoords:
         del x
-        omega_a = self._coords_to_alg(a)
-        omega_b = self._coords_to_alg(b)
-        return self._alg_to_coords(omega_a @ omega_b - omega_b @ omega_a)
+        return jnp.einsum("kij,i,j->k", self._structure_constants, a, b)
