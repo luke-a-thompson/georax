@@ -63,6 +63,7 @@ def find_geometry(terms: AbstractTerm) -> Manifold[Any]:
         f"Expected a GeometricTerm, or a MultiTerm containing a GeometricTerm; got {type(base).__name__}."
     )
 
+
 class PulledDriftTerm(AbstractTerm[Array, RealScalarLike]):
     """Lie-algebra pullback of a manifold drift term anchored at ``y_anchor``."""
 
@@ -155,3 +156,15 @@ def select_chart_for_solver(
             f"Solver {type(solver).__name__} provides no order for chart selection."
         )
     geometry.select_chart(max(orders))
+
+
+def coordinate_shape_for_solver(
+    solver: AbstractSolver[_SolverState], geometry: Manifold[Any]
+) -> tuple[int, ...]:
+    try:
+        return geometry.coordinate_shape
+    except NotImplementedError as exc:
+        raise TypeError(
+            f"{type(solver).__name__} requires a geometry with a fixed coordinate_shape; "
+            f"{type(geometry).__name__} does not provide one."
+        ) from exc

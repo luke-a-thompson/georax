@@ -13,6 +13,7 @@ from diffrax._solver.runge_kutta import AbstractERK
 from georax._term import (
     GeometricTerm,
     PulledDriftTerm,
+    coordinate_shape_for_solver,
     find_geometry,
     select_chart_for_solver,
     unwrap_term,
@@ -109,7 +110,9 @@ class RKMK(AbstractWrappedSolver):
         geometry = base_term.geometry
 
         algebra_term = PulledDriftTerm(base_term, y0)
-        omega0 = jnp.zeros(geometry.coordinate_shape, dtype=jnp.result_type(y0))
+        omega0 = jnp.zeros(
+            coordinate_shape_for_solver(self, geometry), dtype=jnp.result_type(y0)
+        )
 
         omega1, omega_error, _, _, result = self.solver.step(
             algebra_term,

@@ -16,8 +16,6 @@ from ._geometry import (
     Euclidean,
     LocalChart,
     Manifold,
-    covariant_derivative,
-    post_lie_bracket,
 )
 from ._term import GeometricTerm
 
@@ -33,8 +31,6 @@ __all__ = [
     "SRKMK",
     "Manifold",
     "LocalChart",
-    "covariant_derivative",
-    "post_lie_bracket",
     "Euclidean",
     "SO",
     "SPD",

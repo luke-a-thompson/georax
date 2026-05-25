@@ -8,8 +8,9 @@ from georax import SO
 
 def test_so_increment_stays_on_group() -> None:
     so5 = SO(5)
+    so5.select_chart(2)
     x = jnp.eye(5)
-    a = jnp.linspace(-0.2, 0.2, so5.lie_algebra_dimension)
+    a = jnp.linspace(-0.2, 0.2, so5.coordinate_shape[0])
 
     y = so5.apply_increment(x, a)
 
@@ -20,7 +21,7 @@ def test_so_increment_stays_on_group() -> None:
 def test_chart_inverse_differential_is_identity_at_zero() -> None:
     so3 = SO(3)
     so3.select_chart(2)
-    omega = jnp.zeros(so3.lie_algebra_dimension)
+    omega = jnp.zeros(so3.coordinate_shape)
     eta = jnp.array([0.3, -0.4, 0.2])
     assert so3.chart is not None
 
@@ -41,6 +42,6 @@ def test_cayley_inverse_differential_matches_chart_jvp() -> None:
         (omega,),
         (pullback,),
     )
-    target = y @ so3._coords_to_alg(eta, dtype=y.dtype)
+    target = y @ so3._coords_to_alg(eta)
 
     assert bool(jnp.allclose(tangent, target, atol=1e-6))

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import ClassVar, override
 
-import numpy as np
 from diffrax import (
     RESULTS,
     AbstractReversibleSolver,

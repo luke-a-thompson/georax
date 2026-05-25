@@ -13,6 +13,7 @@ def _is_spd(x: jnp.ndarray) -> bool:
 
 def test_spd_increment_stays_in_spd() -> None:
     spd = SPD(2)
+    spd.select_chart(2)
     x = jnp.array([[2.0, 0.3], [0.3, 1.4]])
     a = jnp.array([0.2, -0.1, 0.35])
 
@@ -23,6 +24,7 @@ def test_spd_increment_stays_in_spd() -> None:
 
 def test_spd_increment_matches_first_order_tangent_step() -> None:
     spd = SPD(2)
+    spd.select_chart(2)
     x = jnp.array([[1.8, 0.2], [0.2, 1.3]])
     a = jnp.array([0.4, -0.15, 0.25])
     lift = spd._coords_to_sym(a)
@@ -44,15 +46,15 @@ def test_spd_commutator_free_step_preserves_spd() -> None:
         return jnp.array([0.05, -0.01, 0.02])
 
     term = GeometricTerm(coeffs, geometry=geometry)
+    solver_state = solver.init(term, 0.0, 0.1, y0, None)
     y1, _, _, _, _ = solver.step(
         terms=term,
         t0=0.0,
         t1=0.1,
         y0=y0,
         args=None,
-        solver_state=None,
+        solver_state=solver_state,
         made_jump=False,
     )
 
     assert _is_spd(y1)
-

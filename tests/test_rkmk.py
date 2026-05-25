@@ -15,6 +15,8 @@ _T1 = 1.0
 _Y0 = jnp.eye(3, dtype=jnp.float64)
 _MAX_STEPS = 100_000
 _TERM = make_solver_accuracy_term()
+
+
 def _reference_y1():
     reference = diffrax.diffeqsolve(
         make_solver_accuracy_ambient_term(),

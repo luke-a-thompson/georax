@@ -4,7 +4,11 @@ import diffrax
 import jax
 import jax.numpy as jnp
 import pytest
-from conftest import SOLVERS, make_solver_accuracy_ambient_term, make_solver_accuracy_term
+from conftest import (
+    SOLVERS,
+    make_solver_accuracy_ambient_term,
+    make_solver_accuracy_term,
+)
 
 # Improves stability of empirical slope estimation for convergence-order checks.
 jax.config.update("jax_enable_x64", True)
@@ -102,7 +106,10 @@ def test_solver_backward_empirical_order_matches_declared_order(
     expected_order = solver.antisymmetric_order(_TERM)
     assert expected_order is not None
 
-    dts = jnp.array([0.1, 0.05, 0.025, 0.0125], dtype=jnp.float64)
+    # Higher antisymmetric-order methods can hit floating-point roundoff on the
+    # smaller forward-error step sizes, which makes the log-log slope fit
+    # measure numerical noise instead of the reversible defect.
+    dts = jnp.array([0.5, 0.25, 0.125, 0.0625], dtype=jnp.float64)
     errors = []
     for dt in dts:
         errors.append(_reversible_roundtrip_error(solver, float(dt)))

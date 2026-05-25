@@ -33,9 +33,7 @@ def _memory_params() -> list[Any]:
     out = []
     for case in FORWARD_CASES:
         for solver_name, solver_cls in bench_solvers_for_case(case):
-            out.append(
-                pytest.param(case, solver_cls, id=f"{case.name}-{solver_name}")
-            )
+            out.append(pytest.param(case, solver_cls, id=f"{case.name}-{solver_name}"))
     return out
 
 

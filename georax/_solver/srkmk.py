@@ -19,6 +19,7 @@ from georax._term import (
     GeometricTerm,
     PulledDiffusionTerm,
     PulledDriftTerm,
+    coordinate_shape_for_solver,
     select_chart_for_solver,
     unwrap_term,
 )
@@ -154,7 +155,8 @@ class SRKMK(AbstractWrappedSolver):
         # false ``additive_after_pullback=True`` claim. For general tableaus
         # AbstractSRK.init is a no-op.
         omega0 = jnp.zeros(
-            drift_term.geometry.coordinate_shape, dtype=jnp.result_type(y0)
+            coordinate_shape_for_solver(self, drift_term.geometry),
+            dtype=jnp.result_type(y0),
         )
         algebra_terms = MultiTerm(
             PulledDriftTerm(drift_term, y0),
@@ -193,7 +195,9 @@ class SRKMK(AbstractWrappedSolver):
         if chart is None:
             raise TypeError("SRKMK requires a geometry with a selected chart.")
 
-        omega0 = jnp.zeros(geometry.coordinate_shape, dtype=jnp.result_type(y0))
+        omega0 = jnp.zeros(
+            coordinate_shape_for_solver(self, geometry), dtype=jnp.result_type(y0)
+        )
         algebra_terms = MultiTerm(
             PulledDriftTerm(drift_term, y0),
             PulledDiffusionTerm(drift_term, diffusion_term, y0, omega0),

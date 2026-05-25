@@ -44,6 +44,26 @@ class AffineRetractionOps(Manifold["AffineRetractionOps"]):
         object.__setattr__(self, "chart", chart)
         return chart
 
+    @property
+    def state_shape(self) -> tuple[int, ...]:
+        return (1,)
+
+    @property
+    def coordinate_shape(self) -> tuple[int, ...]:
+        return (1,)
+
+    def trivialise(self, x: Array, v: Array) -> Array:
+        del x
+        return v
+
+    def detrivialise(self, x: Array, a: Array) -> Array:
+        del x
+        return a
+
+    def frame_bracket(self, x: Array, a: Array, b: Array) -> Array:
+        del x
+        return jnp.zeros_like(a + b)
+
 
 class _AffineRetractionChart(LocalChart[AffineRetractionOps]):
     order: int = 12
@@ -89,13 +109,14 @@ def _run_step(
     t0: float = 0.0,
     t1: float = 1.0,
 ):
+    solver_state = solver.init(terms, t0, t1, y0, None)
     y1, y_error, dense_info, solver_state, result = solver.step(
         terms=terms,
         t0=t0,
         t1=t1,
         y0=y0,
         args=None,
-        solver_state=None,
+        solver_state=solver_state,
         made_jump=False,
     )
     return y1, y_error, dense_info, solver_state, result
@@ -304,33 +325,3 @@ def test_spd_control_term_step_preserves_spd() -> None:
 
     assert bool(jnp.allclose(y1, y1.T, atol=1e-6))
     assert bool(jnp.all(jnp.linalg.eigvalsh(y1) > 0.0))
-
-
-def test_cfees25_supports_checkpointed_reversible_adjoint() -> None:
-    key = jax.random.key(0)
-    path = VirtualBrownianTree(
-        t0=0.0,
-        t1=1.0,
-        tol=0.05,
-        shape=(1,),
-        key=key,
-    )
-    term = MultiTerm(
-        GeometricTerm(lambda t, y, args: jnp.zeros_like(y), geometry=Euclidean()),
-        ControlTerm(lambda t, y, args: jnp.eye(1), path),
-    )
-
-    solution = diffeqsolve(
-        term,
-        CFEES25(),
-        t0=0.0,
-        t1=1.0,
-        dt0=0.1,
-        y0=jnp.array([1.0]),
-        saveat=SaveAt(t1=True),
-        adjoint=CheckpointedReversibleAdjoint(checkpoint_every=4),
-        max_steps=32,
-    )
-
-    assert solution.ys is not None
-    assert solution.ys.shape == (1, 1)

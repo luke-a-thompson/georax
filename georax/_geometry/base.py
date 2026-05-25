@@ -7,7 +7,6 @@ from typing import Any, ClassVar, Generic, TypeVar
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from diffrax._custom_types import RealScalarLike
 from jax.flatten_util import ravel_pytree
 from jaxtyping import Array, Num
 
@@ -18,7 +17,7 @@ StateMatrix = Num[Array, "{self.state_shape[0]} {self.state_shape[1]}"]
 
 
 class LocalChart(eqx.Module, Generic[Geometry]):
-    order: RealScalarLike
+    order: int
 
     @abstractmethod
     def apply(self, x: Array, a: Array, geometry: Geometry) -> Array:
@@ -109,7 +108,7 @@ class Manifold(eqx.Module, Generic[Geometry]):
         return chart.apply(x, a, self)
 
     def select_chart(
-        self: Geometry, required_order: RealScalarLike
+        self: Geometry, required_order: int
     ) -> LocalChart[Geometry]:
         """Choose a local chart based on the order required by the solver."""
         chart = self._chart_class(required_order)
