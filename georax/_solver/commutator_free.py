@@ -148,7 +148,7 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
             )
             # This ambient subtraction is acceptable for now; a geometry-aware
             # difference may be preferable for manifold error control later.
-            y_error = y_hat - y1
+            y_error = y1 - y_hat
 
         dense_info = dict(y0=y0, y1=y1)
         return y1, y_error, dense_info, None, RESULTS.successful
