@@ -112,9 +112,7 @@ class Manifold(eqx.Module, Generic[Geometry]):
         self.check_state_shape(x)
         return jnp.zeros(self.coordinate_shape, dtype=jnp.result_type(x))
 
-    def select_chart(
-        self: Geometry, required_order: int
-    ) -> LocalChart[Geometry]:
+    def select_chart(self: Geometry, required_order: int) -> LocalChart[Geometry]:
         """Choose a local chart based on the order required by the solver."""
         chart = self._chart_class(required_order)
         object.__setattr__(self, "chart", chart)

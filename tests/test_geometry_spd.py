@@ -3,7 +3,8 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from georax import CG2, SPD, GeometricTerm, post_lie_bracket
+from georax import CG2, SPD, GeometricTerm
+from georax._geometry.base import post_lie_bracket
 
 
 def _is_spd(x: jnp.ndarray) -> bool:

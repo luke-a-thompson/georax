@@ -2,17 +2,14 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 from diffrax import (
     AbstractStratonovichSolver,
-    CheckpointedReversibleAdjoint,
     ControlTerm,
     MultiTerm,
     SaveAt,
-    VirtualBrownianTree,
     diffeqsolve,
 )
 from diffrax_lowstorage import LowStorageRecurrence
