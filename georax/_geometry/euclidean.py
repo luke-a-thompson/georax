@@ -3,7 +3,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 from jaxtyping import Array
 
-from .base import FrameCoords, LocalChart, Manifold, StateMatrix
+from .base import FrameCoords, LocalChart, Manifold, StateArray
 
 
 class EuclideanChart(LocalChart["Euclidean"]):
@@ -30,29 +30,32 @@ class Euclidean(Manifold["Euclidean"]):
     _chart_class = EuclideanChart
 
     @property
-    def state_shape(self) -> tuple[int, int]:
+    def state_shape(self) -> tuple[int, ...]:
         raise NotImplementedError
 
     @property
     def coordinate_shape(self) -> tuple[int, ...]:
         raise NotImplementedError
 
-    def check_state_shape(self, x: StateMatrix) -> None:
-        pass
+    def check_state_shape(self, x: StateArray) -> None:
+        del x
 
     def check_coordinate_shape(self, a: FrameCoords) -> None:
-        pass
+        del a
 
-    def trivialise(self, x: StateMatrix, v: StateMatrix) -> FrameCoords:
+    def zero_coordinates(self, x: StateArray) -> FrameCoords:
+        return jnp.zeros_like(x)
+
+    def trivialise(self, x: StateArray, v: StateArray) -> FrameCoords:
         del x
         return v
 
-    def detrivialise(self, x: StateMatrix, a: FrameCoords) -> StateMatrix:
+    def detrivialise(self, x: StateArray, a: FrameCoords) -> StateArray:
         del x
         return a
 
     def frame_bracket(
-        self, x: StateMatrix, a: FrameCoords, b: FrameCoords
+        self, x: StateArray, a: FrameCoords, b: FrameCoords
     ) -> FrameCoords:
         del x
         return jnp.zeros_like(a + b)

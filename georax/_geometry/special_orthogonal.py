@@ -6,20 +6,18 @@ import numpy as np
 from jaxtyping import Array
 
 from ._charts import SOChart
-from .base import FrameCoords, Manifold, StateMatrix
+from .base import FrameCoords, Manifold, StateArray
 
 __all__ = ["SO"]
 
 
 class SO(Manifold["SO"]):
-    """SO(n) with a left-invariant frame and Cayley retraction."""
+    """SO(n) with a left-invariant frame and order-dependent local chart."""
 
     _chart_class = SOChart
     n: int = eqx.field(static=True)
     _upper_i: Array
     _upper_j: Array
-    _basis: Array
-    _structure_constants: Array
 
     def __init__(self, n: int):
         n = int(n)
@@ -27,24 +25,9 @@ class SO(Manifold["SO"]):
             raise ValueError("SO(n) requires n >= 2.")
 
         upper_i, upper_j = np.triu_indices(n, k=1)
-        d = upper_i.size
-        basis = np.zeros((n, n, d), dtype=float)
-        k = np.arange(d)
-        basis[upper_i, upper_j, k] = 1.0
-        basis[upper_j, upper_i, k] = -1.0
-
-        structure = np.zeros((d, d, d), dtype=basis.dtype)
-        for i in range(d):
-            for j in range(d):
-                commutator = basis[:, :, i] @ basis[:, :, j]
-                commutator -= basis[:, :, j] @ basis[:, :, i]
-                structure[:, i, j] = commutator[upper_i, upper_j]
-
         object.__setattr__(self, "n", n)
         object.__setattr__(self, "_upper_i", jnp.asarray(upper_i))
         object.__setattr__(self, "_upper_j", jnp.asarray(upper_j))
-        object.__setattr__(self, "_basis", jnp.asarray(basis))
-        object.__setattr__(self, "_structure_constants", jnp.asarray(structure))
 
     @property
     def state_shape(self) -> tuple[int, int]:
@@ -70,17 +53,24 @@ class SO(Manifold["SO"]):
         omega = 0.5 * (omega - omega.T)
         return omega[self._upper_i, self._upper_j]
 
-    def trivialise(self, x: StateMatrix, v: StateMatrix) -> FrameCoords:
+    def trivialise(self, x: StateArray, v: StateArray) -> FrameCoords:
         self.check_state_shape(x)
         self.check_state_shape(v)
         return self._alg_to_coords(x.T @ v)
 
-    def detrivialise(self, x: StateMatrix, a: FrameCoords) -> StateMatrix:
+    def detrivialise(self, x: StateArray, a: FrameCoords) -> StateArray:
         self.check_state_shape(x)
         return x @ self._coords_to_alg(a)
 
     def frame_bracket(
-        self, x: StateMatrix, a: FrameCoords, b: FrameCoords
+        self, x: StateArray, a: FrameCoords, b: FrameCoords
     ) -> FrameCoords:
         del x
-        return jnp.einsum("kij,i,j->k", self._structure_constants, a, b)
+        lift_a = self._coords_to_alg(a)
+        lift_b = self._coords_to_alg(b)
+        return self._alg_to_coords(lift_a @ lift_b - lift_b @ lift_a)
+
+    def select_pullback_chart(self, required_order):
+        """Use Cayley as an exact coordinate map for pulled-back equations."""
+        del required_order
+        return self.select_chart(2)
