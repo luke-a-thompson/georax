@@ -9,6 +9,7 @@ import os
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
 
@@ -22,8 +23,6 @@ import matplotlib
 import matplotlib.markers as mkr
 import matplotlib.pyplot as plt
 import numpy as np
-from diffrax import ReversibleAdjoint
-from diffrax._custom_types import Args, RealScalarLike
 from fbm import FBM
 from jaxtyping import Array
 
@@ -42,37 +41,7 @@ YLABEL_FORWARD = r"$\log_{10}(\mathcal{E}(h))$"
 YLABEL_BACKWARD = r"$\log_{10}(\overleftarrow{\mathcal{E}}(h))$"
 
 
-class LinearSpaceTimeControl(diffrax.AbstractPath):
-    control: diffrax.AbstractPath
-
-    @property
-    def t0(self):
-        return self.control.t0
-
-    @property
-    def t1(self):
-        return self.control.t1
-
-    def evaluate(
-        self,
-        t0: RealScalarLike,
-        t1: RealScalarLike | None = None,
-        left: bool = True,
-        *,
-        use_levy: bool = False,
-    ):
-        if t1 is None:
-            return self.control.evaluate(t0, left=left)
-
-        w = self.control.evaluate(t0, t1, left=left)
-        if not use_levy:
-            return w
-
-        h = jax.tree_util.tree_map(jnp.zeros_like, w)
-        return diffrax.SpaceTimeLevyArea(dt=t1 - t0, W=w, H=h)
-
-
-def so3_coeffs_matrix(t: RealScalarLike, x: Array, args: Args) -> Array:
+def so3_coeffs_matrix(t: Any, x: Array, args: Any) -> Array:
     del t, args
     old_coeffs = SIGMA * jnp.array(
         [
@@ -110,13 +79,10 @@ def make_matrix_method_runner(
     solver,
     *,
     geometry,
-    coeffs_matrix_fn: Callable[[RealScalarLike, Array, Args], Array],
+    coeffs_matrix_fn: Callable[[Any, Array, Any], Array],
     y0_default: np.ndarray,
-    use_space_time_levy: bool = False,
-    use_reversible_adjoint: bool = True,
 ) -> Callable[..., np.ndarray]:
     stepsize_controller = diffrax.ConstantStepSize()
-    adjoint = ReversibleAdjoint() if use_reversible_adjoint else None
     frame_shape = coeffs_matrix_fn(
         T0, jnp.asarray(y0_default, dtype=jnp.float64), None
     ).shape[:-1]
@@ -133,8 +99,6 @@ def make_matrix_method_runner(
         @jax.jit
         def _run(x: jax.Array, y0: jax.Array) -> jax.Array:
             control = diffrax.LinearInterpolation(ts=ts, ys=x)
-            if use_space_time_levy:
-                control = LinearSpaceTimeControl(control)
             term = diffrax.MultiTerm(
                 GeometricTerm(
                     lambda t, y, args: jnp.zeros(frame_shape, dtype=y.dtype),
@@ -145,9 +109,6 @@ def make_matrix_method_runner(
                     control,
                 ),
             )
-            solve_kwargs = {}
-            if adjoint is not None:
-                solve_kwargs["adjoint"] = adjoint
             solution = diffrax.diffeqsolve(
                 term,
                 solver,
@@ -157,9 +118,9 @@ def make_matrix_method_runner(
                 y0=y0,
                 saveat=saveat,
                 stepsize_controller=stepsize_controller,
+                adjoint=diffrax.ReversibleAdjoint(),
                 max_steps=num_points + 4,
                 throw=True,
-                **solve_kwargs,
             )
             assert solution.ys is not None
             return solution.ys
@@ -186,17 +147,6 @@ def make_so3_method_runner(solver) -> Callable[..., np.ndarray]:
     )
 
 
-def make_so3_srkmk_method_runner(solver) -> Callable[..., np.ndarray]:
-    return make_matrix_method_runner(
-        solver,
-        geometry=SO3_GEOMETRY,
-        coeffs_matrix_fn=so3_coeffs_matrix,
-        y0_default=np.asarray(SO3_X0, dtype=np.float64),
-        use_space_time_levy=True,
-        use_reversible_adjoint=False,
-    )
-
-
 def get_error(y_exact: np.ndarray, y_vals: np.ndarray, step: int) -> float:
     true_vals = y_exact[::step]
     return float(np.max(np.linalg.norm(true_vals - y_vals, axis=(1, 2))))
@@ -210,9 +160,6 @@ def compute_error_curves(
     method_run,
     paths: list[np.ndarray],
     hs: np.ndarray,
-    *,
-    error_fn: Callable[[np.ndarray, np.ndarray, int], float],
-    distance_fn: Callable[[np.ndarray | float, np.ndarray | float], float],
 ) -> tuple[np.ndarray, np.ndarray]:
     forward_y = np.zeros(len(hs), dtype=np.float64)
     backward_y = np.zeros(len(hs), dtype=np.float64)
@@ -227,10 +174,10 @@ def compute_error_curves(
             step = max(1, int(round(n * h)))
             x_coarse = x[::step]
             y_coarse = method_run(x_coarse)
-            forward_error.append(error_fn(y_exact, y_coarse, step))
+            forward_error.append(get_error(y_exact, y_coarse, step))
 
             y_backward = method_run(x_coarse[::-1], y0=y_coarse[-1])
-            backward_error.append(distance_fn(y_exact[0], y_backward[-1]))
+            backward_error.append(matrix_distance(y_exact[0], y_backward[-1]))
 
         forward_y += np.log10(np.maximum(forward_error, np.finfo(np.float64).tiny))
         backward_y += np.log10(np.maximum(backward_error, np.finfo(np.float64).tiny))
@@ -250,7 +197,8 @@ def plot_curve(
     x = np.log10(h)
     dx = np.array([x[0], x[-1]], dtype=np.float64)
     intercept = float(np.mean(y) - slope * np.mean(x))
-    fit = np.polyfit(x, y, 1)
+    resolved = y > np.log10(100 * np.finfo(np.float64).eps)
+    fit = np.polyfit(x[resolved], y[resolved], 1) if resolved.sum() >= 2 else (np.nan,)
     err_label = YLABEL_BACKWARD if backward else YLABEL_FORWARD
     mode = "backward" if backward else "forward"
     print(f"{name} {mode} slope: {fit[0]:.6f}")
@@ -299,53 +247,21 @@ def plot_grid(
     hurst: float,
     output_dir: Path,
 ) -> Path:
-    benchmarks = [
-        (
-            "CF-EES25",
-            CFEES25(),
-            make_so3_method_runner,
-            get_error,
-            matrix_distance,
-            r"$\mathcal{E}(h)$ for $\mathrm{CF\text{-}EES}_\mathcal{R}(2,5)$",
-            r"$\overleftarrow{\mathcal{E}}(h)$ for $\mathrm{CF\text{-}EES}_\mathcal{R}(2,5)$",
-        ),
-        (
-            "CF-EES27",
-            CFEES27(),
-            make_so3_method_runner,
-            get_error,
-            matrix_distance,
-            r"$\mathcal{E}(h)$ for $\mathrm{CF\text{-}EES}_\mathcal{R}(2,7)$",
-            r"$\overleftarrow{\mathcal{E}}(h)$ for $\mathrm{CF\text{-}EES}_\mathcal{R}(2,7)$",
-        ),
-    ]
+    benchmarks = [("CF-EES25", CFEES25(), 5), ("CF-EES27", CFEES27(), 7)]
 
     fig, axes = plt.subplots(len(benchmarks), 2, figsize=(10, 3.2 * len(benchmarks)))
 
-    for i, (
-        name,
-        solver,
-        runner_factory,
-        error_fn,
-        distance_fn,
-        fwd_title,
-        bwd_title,
-    ) in enumerate(benchmarks):
-        runner = runner_factory(solver)
-        forward_y, backward_y = compute_error_curves(
-            runner,
-            paths,
-            hs,
-            error_fn=error_fn,
-            distance_fn=distance_fn,
-        )
+    for i, (name, solver, antisymmetric_order) in enumerate(benchmarks):
+        runner = make_so3_method_runner(solver)
+        forward_y, backward_y = compute_error_curves(runner, paths, hs)
         forward_rate, backward_rate = expected_rates(solver, hurst)
 
         plot_curve(name, hs, forward_y, forward_rate, axes[i][0], backward=False)
-        axes[i][0].set_title(fwd_title)
+        method = rf"\mathrm{{CF\text{{-}}EES}}_\mathcal{{R}}(2,{antisymmetric_order})"
+        axes[i][0].set_title(rf"$\mathcal{{E}}(h)$ for ${method}$")
 
         plot_curve(name, hs, backward_y, backward_rate, axes[i][1], backward=True)
-        axes[i][1].set_title(bwd_title)
+        axes[i][1].set_title(rf"$\overleftarrow{{\mathcal{{E}}}}(h)$ for ${method}$")
 
     plt.tight_layout()
     output_dir.mkdir(parents=True, exist_ok=True)

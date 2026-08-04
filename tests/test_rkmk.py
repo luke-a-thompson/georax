@@ -6,7 +6,8 @@ import jax.numpy as jnp
 from conftest import make_solver_accuracy_ambient_term, make_solver_accuracy_term
 from diffrax import Heun
 
-from georax import RKMK
+from georax import RKMK, Euclidean, GeometricTerm
+from georax._term import PulledDriftTerm
 
 jax.config.update("jax_enable_x64", True)
 
@@ -103,3 +104,43 @@ def test_rkmk_heun_returns_error_estimate_from_embedded_base() -> None:
     assert out.ys is not None
     assert out.result == diffrax.RESULTS.successful
     assert out.stats["num_accepted_steps"] > 0
+
+
+def test_rkmk_matches_heun_on_euclidean_geometry() -> None:
+    def vf(t, y, args):
+        del t, args
+        return -0.2 * y
+
+    y0 = jnp.array([1.0, -0.5])
+    kwargs = dict(t0=0.0, t1=1.0, dt0=0.1, y0=y0, saveat=diffrax.SaveAt(t1=True))
+    wrapped = diffrax.diffeqsolve(
+        GeometricTerm(vf, Euclidean()), RKMK(Heun()), **kwargs
+    )
+    reference = diffrax.diffeqsolve(diffrax.ODETerm(vf), Heun(), **kwargs)
+
+    assert wrapped.ys is not None
+    assert reference.ys is not None
+    assert bool(jnp.allclose(wrapped.ys, reference.ys, atol=1e-7))
+
+
+def test_rkmk_error_is_difference_between_reconstructed_states() -> None:
+    solver = RKMK(Heun())
+    solver.init(_TERM, 0.0, 0.2, _Y0, None)
+    y1, y_error, _, _, _ = solver.step(_TERM, 0.0, 0.2, _Y0, None, None, False)
+
+    geometry = _TERM.geometry
+    omega0 = geometry.zero_coordinates(_Y0)
+    omega1, omega_error, _, _, _ = solver.solver.step(
+        PulledDriftTerm(_TERM, _Y0),
+        0.0,
+        0.2,
+        omega0,
+        None,
+        None,
+        False,
+    )
+    assert omega_error is not None
+    expected = geometry.apply_increment(_Y0, omega1 + omega_error) - y1
+
+    assert y_error is not None
+    assert bool(jnp.allclose(y_error, expected))

@@ -4,9 +4,11 @@ from typing import ClassVar, override
 
 import numpy as np
 
-from georax._solver.commutator_free import AbstractCommutatorFreeSolver
+from georax._solver.commutator_free import (
+    AbstractCommutatorFreeSolver,
+    CommutatorFreeTableau,
+)
 from georax._term import GeometricTerm
-from georax._solver.commutator_free import CommutatorFreeTableau
 
 _cg2_tableau = CommutatorFreeTableau(
     c=(0.0, 0.5),

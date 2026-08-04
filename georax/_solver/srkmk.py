@@ -3,23 +3,30 @@ from __future__ import annotations
 from typing import override
 
 import equinox as eqx
-import jax.numpy as jnp
-from diffrax import RESULTS, AbstractTerm, MultiTerm
-from diffrax._custom_types import VF, Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
-from diffrax._local_interpolation import LocalLinearInterpolation
-from diffrax._solver.base import AbstractSolver, AbstractWrappedSolver
-from diffrax._solver.srk import (
+from diffrax import (
+    RESULTS,
     AbstractSRK,
-    AdditiveCoeffs,
-    GeneralCoeffs,
+    AbstractSolver,
+    AbstractTerm,
+    AbstractWrappedSolver,
+    LocalLinearInterpolation,
+    MultiTerm,
     StochasticButcherTableau,
 )
-
+from georax._compat import (
+    AdditiveCoeffs,
+    Args,
+    BoolScalarLike,
+    DenseInfo,
+    GeneralCoeffs,
+    RealScalarLike,
+    VF,
+    Y,
+)
 from georax._term import (
     GeometricTerm,
     PulledDiffusionTerm,
     PulledDriftTerm,
-    coordinate_shape_for_solver,
     select_chart_for_solver,
     unwrap_term,
 )
@@ -147,17 +154,14 @@ class SRKMK(AbstractWrappedSolver):
         # Chart selection is delegated to the geometry. For exponential-style
         # charts this should be conservative enough to satisfy the SRKMK
         # truncation condition for the wrapped method.
-        select_chart_for_solver(self, drift_term.geometry)
+        select_chart_for_solver(self, terms, drift_term.geometry)
 
         # Defer to the wrapped SRK's init for any trace-time validation. For
         # additive tableaus this performs a JVP check that the (pulled-back)
         # diffusion is independent of the algebra state — i.e. it catches a
         # false ``additive_after_pullback=True`` claim. For general tableaus
         # AbstractSRK.init is a no-op.
-        omega0 = jnp.zeros(
-            coordinate_shape_for_solver(self, drift_term.geometry),
-            dtype=jnp.result_type(y0),
-        )
+        omega0 = drift_term.geometry.zero_coordinates(y0)
         algebra_terms = MultiTerm(
             PulledDriftTerm(drift_term, y0),
             PulledDiffusionTerm(drift_term, diffusion_term, y0, omega0),
@@ -195,9 +199,7 @@ class SRKMK(AbstractWrappedSolver):
         if chart is None:
             raise TypeError("SRKMK requires a geometry with a selected chart.")
 
-        omega0 = jnp.zeros(
-            coordinate_shape_for_solver(self, geometry), dtype=jnp.result_type(y0)
-        )
+        omega0 = geometry.zero_coordinates(y0)
         algebra_terms = MultiTerm(
             PulledDriftTerm(drift_term, y0),
             PulledDiffusionTerm(drift_term, diffusion_term, y0, omega0),
@@ -216,7 +218,8 @@ class SRKMK(AbstractWrappedSolver):
 
         y_error = None
         if omega_error is not None:
-            y_error = geometry.apply_increment(y0, omega_error) - y0
+            y_hat = geometry.apply_increment(y0, omega1 + omega_error)
+            y_error = y_hat - y1
 
         dense_info = dict(y0=y0, y1=y1)
         return y1, y_error, dense_info, None, result

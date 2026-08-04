@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 import diffrax
 import jax
@@ -12,7 +13,6 @@ import matplotlib
 import matplotlib.markers as mkr
 import matplotlib.pyplot as plt
 import numpy as np
-from diffrax._custom_types import Args, RealScalarLike
 from jaxtyping import Array
 
 from georax import CFEES25, CFEES27, CG2, CG4, SO, GeometricTerm
@@ -25,7 +25,7 @@ T1 = 1.0
 MAX_STEPS = 100_000
 
 
-def omega_body(t: RealScalarLike) -> Array:
+def omega_body(t: Any) -> Array:
     t_array = jnp.asarray(t)
     return jnp.array(
         [
@@ -36,7 +36,7 @@ def omega_body(t: RealScalarLike) -> Array:
     )
 
 
-def vector_field(t: RealScalarLike, y: Array, args: Args) -> Array:
+def vector_field(t: Any, y: Array, args: Any) -> Array:
     del args
     omega = omega_body(t)
     skew = jnp.array(
@@ -49,7 +49,7 @@ def vector_field(t: RealScalarLike, y: Array, args: Args) -> Array:
     return y @ skew
 
 
-def frame_coeffs(t: RealScalarLike, y: Array, args: Args) -> Array:
+def frame_coeffs(t: Any, y: Array, args: Any) -> Array:
     del y, args
     omega = omega_body(t)
     return jnp.array([-omega[2], omega[1], -omega[0]], dtype=omega.dtype)
@@ -59,8 +59,7 @@ def make_term() -> GeometricTerm:
     return GeometricTerm(frame_coeffs, geometry=SO(3))
 
 
-def reference_solution(term: GeometricTerm, y0: Array) -> Array:
-    del term
+def reference_solution(y0: Array) -> Array:
     solution = diffrax.diffeqsolve(
         diffrax.ODETerm(vector_field),
         diffrax.Dopri8(),
@@ -176,7 +175,8 @@ def plot(
         slope = float(solver.order(term))
 
     intercept = float(np.mean(y) - slope * np.mean(x))
-    fit = np.polyfit(x, y, 1)
+    resolved = np.asarray(errors) > 100 * np.finfo(np.float64).eps
+    fit = np.polyfit(x[resolved], y[resolved], 1) if resolved.sum() >= 2 else (np.nan,)
     err_label = (
         r"$\log_{10}(\mathcal{E}(h))$"
         if not backward
@@ -200,7 +200,7 @@ def plot(
 def plot_grid(hs: list[float], output_dir: Path) -> Path:
     term = make_term()
     y0 = jnp.eye(3, dtype=jnp.float64)
-    y_exact = reference_solution(term, y0)
+    y_exact = reference_solution(y0)
     solvers = [
         ("CG2", CG2()),
         ("CG4", CG4()),

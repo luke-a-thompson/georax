@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from typing import ClassVar, override
 
-from diffrax import RESULTS, AbstractTerm
-from diffrax._custom_types import Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
-from diffrax._local_interpolation import LocalLinearInterpolation
-from diffrax._solver.base import AbstractItoSolver
-
+from diffrax import RESULTS, AbstractItoSolver, AbstractTerm, LocalLinearInterpolation
+from georax._compat import Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
 from georax._term import find_geometry
 
 

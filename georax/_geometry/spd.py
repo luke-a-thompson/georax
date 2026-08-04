@@ -9,7 +9,7 @@ from ._charts import (
     SPDChart,
     _sym,
 )
-from .base import FrameCoords, Manifold, StateMatrix
+from .base import FrameCoords, Manifold, StateArray
 
 __all__ = ["SPD"]
 
@@ -22,7 +22,8 @@ class SPD(Manifold["SPD"]):
 
         E_A(x) = A x + x A,
 
-    and the local chart is the exact congruence action
+    and the local chart approximates the congruence action to the order selected by
+    the solver:
 
         Phi_A(x) = exp(A) x exp(A).
     """
@@ -32,7 +33,6 @@ class SPD(Manifold["SPD"]):
     _diag_i: Array
     _upper_i: Array
     _upper_j: Array
-    _basis: Array
 
     def __init__(self, n: int):
         n = int(n)
@@ -41,21 +41,10 @@ class SPD(Manifold["SPD"]):
 
         diag_i = np.arange(n)
         upper_i, upper_j = np.triu_indices(n, k=1)
-        d = n * (n + 1) // 2
-        basis = np.zeros((n, n, d), dtype=float)
-
-        basis[diag_i, diag_i, diag_i] = 1.0
-        if upper_i.size:
-            k = np.arange(n, d)
-            scale = 1.0 / np.sqrt(2.0)
-            basis[upper_i, upper_j, k] = scale
-            basis[upper_j, upper_i, k] = scale
-
         object.__setattr__(self, "n", n)
         object.__setattr__(self, "_diag_i", jnp.asarray(diag_i))
         object.__setattr__(self, "_upper_i", jnp.asarray(upper_i))
         object.__setattr__(self, "_upper_j", jnp.asarray(upper_j))
-        object.__setattr__(self, "_basis", jnp.asarray(basis))
 
     @property
     def state_shape(self) -> tuple[int, int]:
@@ -88,7 +77,7 @@ class SPD(Manifold["SPD"]):
         off_diag = sqrt_two * tangent[self._upper_i, self._upper_j]
         return jnp.concatenate((diag, off_diag))
 
-    def trivialise(self, x: StateMatrix, v: StateMatrix) -> FrameCoords:
+    def trivialise(self, x: StateArray, v: StateArray) -> FrameCoords:
         self.check_state_shape(x)
         self.check_state_shape(v)
         eigvals, eigvecs = jnp.linalg.eigh(_sym(x))
@@ -96,13 +85,13 @@ class SPD(Manifold["SPD"]):
         local_a = local_v / (eigvals[:, None] + eigvals[None, :])
         return self._sym_to_coords(eigvecs @ local_a @ eigvecs.T)
 
-    def detrivialise(self, x: StateMatrix, a: FrameCoords) -> StateMatrix:
+    def detrivialise(self, x: StateArray, a: FrameCoords) -> StateArray:
         self.check_state_shape(x)
         lift = self._coords_to_sym(a)
         return lift @ x + x @ lift
 
     def frame_bracket(
-        self, x: StateMatrix, a: FrameCoords, b: FrameCoords
+        self, x: StateArray, a: FrameCoords, b: FrameCoords
     ) -> FrameCoords:
         self.check_state_shape(x)
         lift_a = self._coords_to_sym(a)

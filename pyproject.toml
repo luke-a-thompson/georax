@@ -7,7 +7,7 @@ name = "georax"
 version = "0.1.0"
 description = "Geometric ODE and SDE solvers for Diffrax"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [
@@ -33,15 +33,14 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Mathematics",
 ]
 dependencies = [
-    "diffrax>=0.7.1",
-    "diffrax-lowstorage>=0.1.0",
+    "diffrax>=0.7.1,<0.8",
+    "diffrax-lowstorage>=0.1.0,<0.2",
     "equinox>=0.13.0",
     "jax>=0.4.38",
     "jaxtyping>=0.3.0",
@@ -55,7 +54,7 @@ Issues = "https://github.com/luke-a-thompson/georax/issues"
 
 [tool.uv.sources]
 diffrax = { git = "https://github.com/sammccallum/diffrax", rev = "aeb1335b5a6278e85a270231e0f97b8db4453ae6" }
-diffrax-lowstorage = { git = "https://github.com/luke-a-thompson/diffrax-lowstorage.git" }
+diffrax-lowstorage = { git = "https://github.com/luke-a-thompson/diffrax-lowstorage.git", rev = "dc3a519919a634701c9cbb8cb5afc5f9d102a757" }
 
 [project.optional-dependencies]
 dev = [
