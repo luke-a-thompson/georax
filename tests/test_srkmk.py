@@ -108,15 +108,10 @@ def test_additive_srk_requires_pullback_additivity_assumption() -> None:
         raise AssertionError("Expected additive SRK to require an explicit assumption.")
 
 
-def test_srkmk_rejects_shape_free_euclidean_geometry() -> None:
+def test_srkmk_accepts_shape_free_euclidean_geometry() -> None:
     terms = diffrax.MultiTerm(
         GeometricTerm(lambda t, y, args: jnp.zeros_like(y), geometry=Euclidean()),
         diffrax.ControlTerm(lambda t, y, args: jnp.eye(2), _brownian((2,), 5)),
     )
 
-    try:
-        SRKMK(diffrax.GeneralShARK()).init(terms, 0.0, 0.1, jnp.ones(2), None)
-    except TypeError as exc:
-        assert "fixed coordinate_shape" in str(exc)
-    else:
-        raise AssertionError("Expected SRKMK to reject shape-free Euclidean geometry.")
+    SRKMK(diffrax.GeneralShARK()).init(terms, 0.0, 0.1, jnp.ones(2), None)

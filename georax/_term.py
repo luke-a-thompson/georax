@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, override, TypeVar
+from typing import Any, TypeVar, override
 
 import equinox as eqx
 from diffrax import AbstractSolver, AbstractTerm, MultiTerm
-from diffrax._custom_types import VF, Args, RealScalarLike, Y
-from diffrax._term import WrapTerm
 from jaxtyping import Array
-
+from georax._compat import Args, RealScalarLike, VF, WrapTerm, Y
 from georax._geometry import Manifold
 
 _SolverState = TypeVar("_SolverState")
@@ -143,11 +141,15 @@ class PulledDiffusionTerm(AbstractTerm[VF, object]):
 
 
 def select_chart_for_solver(
-    solver: AbstractSolver[_SolverState], geometry: Manifold[Any]
+    solver: AbstractSolver[_SolverState],
+    terms: AbstractTerm,
+    geometry: Manifold[Any],
+    *,
+    pullback: bool = False,
 ) -> None:
     """Select a chart based on the highest order the solver may need."""
     orders = [
-        getattr(solver, name, lambda _: None)(geometry)
+        getattr(solver, name, lambda _: None)(terms)
         for name in ("order", "error_order", "antisymmetric_order")
     ]
     orders = [int(o) for o in orders if o is not None]
@@ -155,16 +157,5 @@ def select_chart_for_solver(
         raise ValueError(
             f"Solver {type(solver).__name__} provides no order for chart selection."
         )
-    geometry.select_chart(max(orders))
-
-
-def coordinate_shape_for_solver(
-    solver: AbstractSolver[_SolverState], geometry: Manifold[Any]
-) -> tuple[int, ...]:
-    try:
-        return geometry.coordinate_shape
-    except NotImplementedError as exc:
-        raise TypeError(
-            f"{type(solver).__name__} requires a geometry with a fixed coordinate_shape; "
-            f"{type(geometry).__name__} does not provide one."
-        ) from exc
+    selector = geometry.select_pullback_chart if pullback else geometry.select_chart
+    selector(max(orders))
