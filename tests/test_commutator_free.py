@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from diffrax import (
+    AbstractStratonovichSolver,
     CheckpointedReversibleAdjoint,
     ControlTerm,
     MultiTerm,
@@ -19,6 +20,7 @@ from jaxtyping import Array
 
 from georax import (
     CFEES25,
+    CFEES27,
     CG2,
     SPD,
     AbstractCommutatorFreeSolver,
@@ -216,7 +218,7 @@ def test_embedded_pair_returns_error_estimate() -> None:
 
     assert bool(jnp.allclose(y1, jnp.array([4.0])))
     assert y_error is not None
-    assert bool(jnp.allclose(y_error, jnp.array([3.0])))
+    assert bool(jnp.allclose(y_error, jnp.array([-3.0])))
     assert bool(jnp.allclose(dense_info["y0"], jnp.array([1.0])))
     assert bool(jnp.allclose(dense_info["y1"], y1))
 
@@ -295,6 +297,14 @@ def test_diffeqsolve_accepts_control_terms() -> None:
 
     assert solution.ys is not None
     assert bool(jnp.allclose(solution.ys[0], jnp.array([8.0])))
+
+
+@pytest.mark.parametrize("solver_cls", (CFEES25, CFEES27))
+def test_cfees_solvers_are_stratonovich_and_strong_order_half(solver_cls) -> None:
+    solver = solver_cls()
+
+    assert isinstance(solver, AbstractStratonovichSolver)
+    assert solver.strong_order(None) == 0.5
 
 
 def test_spd_control_term_step_preserves_spd() -> None:

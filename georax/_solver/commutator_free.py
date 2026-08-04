@@ -8,14 +8,16 @@ import jax.numpy as jnp
 import numpy as np
 from diffrax import (
     RESULTS,
+    AbstractReversibleSolver,
     AbstractSolver,
+    AbstractStratonovichSolver,
     AbstractTerm,
     LocalLinearInterpolation,
 )
-from diffrax._custom_types import VF, Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
 from diffrax_lowstorage import LowStorageRecurrence
-from jaxtyping import Array
+from jaxtyping import Array, PyTree
 
+from georax._compat import Args, BoolScalarLike, DenseInfo, RealScalarLike, VF, Y
 from georax._geometry import Manifold
 from georax._term import GeometricTerm, find_geometry, select_chart_for_solver
 
@@ -81,7 +83,7 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
         args: Args,
     ) -> None:
         del t0, t1, y0, args
-        select_chart_for_solver(self, find_geometry(terms))
+        select_chart_for_solver(self, terms, find_geometry(terms))
         return None
 
     @override
@@ -192,12 +194,15 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
             raise TypeError(
                 f"{type(self).__name__} requires a geometry with a selected chart."
             )
-        stages: list[Array] = []
+        stages: list[Array] | None = (
+            [] if self.embedded_penultimate_exps is not None else None
+        )
         last_stage = self.recurrence.num_stages - 1
 
         t_stage0 = t1 if self.recurrence.C[0] == 1.0 else t0 + c[0] * dt
         tmp = terms.prod(terms.vf(t_stage0, y0, args), control)
-        stages.append(tmp)
+        if stages is not None:
+            stages.append(tmp)
         y1 = geometry.apply_increment(y0, jnp.asarray(b[0], dtype=tmp.dtype) * tmp)
 
         y_penultimate = None
@@ -208,7 +213,8 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
                 else t0 + c[stage_index] * dt
             )
             coeffs = terms.prod(terms.vf(t_stage, y1, args), control)
-            stages.append(coeffs)
+            if stages is not None:
+                stages.append(coeffs)
             tmp = jnp.asarray(a[stage_index - 1], dtype=tmp.dtype) * tmp + coeffs
             if self._tracks_penultimate and stage_index == last_stage:
                 y_penultimate = y1
@@ -223,6 +229,7 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
             assert y_penultimate is not None, (
                 "Embedded penultimate exponentials require at least two stages."
             )
+            assert stages is not None
             y_hat = self._apply_exp_product(
                 y_penultimate,
                 self.embedded_penultimate_exps,
@@ -235,3 +242,67 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
 
         dense_info = dict(y0=y0, y1=y1)
         return y1, y_error, dense_info, None, RESULTS.successful
+
+
+class _AbstractCFEES(
+    AbstractLowStorageCommutatorFreeSolver,
+    AbstractReversibleSolver,
+    AbstractStratonovichSolver,
+):
+    """Shared reversible Diffrax plumbing for the commutator-free EES family."""
+
+    @override
+    def init(
+        self,
+        terms: AbstractTerm,
+        t0: RealScalarLike,
+        t1: RealScalarLike,
+        y0: Y,
+        args: Args,
+    ) -> Y:
+        super().init(terms, t0, t1, y0, args)
+        return y0
+
+    @override
+    def order(self, terms: AbstractTerm) -> int:
+        del terms
+        return 2
+
+    def strong_order(self, terms: AbstractTerm) -> float:
+        del terms
+        return 0.5
+
+    @override
+    def step(
+        self,
+        terms: AbstractTerm,
+        t0: RealScalarLike,
+        t1: RealScalarLike,
+        y0: Y,
+        args: Args,
+        solver_state: Y,
+        made_jump: BoolScalarLike,
+    ) -> tuple[Y, Y | None, DenseInfo, Y, RESULTS]:
+        del solver_state
+        y1, y_error, dense_info, _, result = super().step(
+            terms, t0, t1, y0, args, None, made_jump
+        )
+        return y1, y_error, dense_info, y1, result
+
+    @override
+    def backward_step(
+        self,
+        terms: PyTree[AbstractTerm],
+        t0: RealScalarLike,
+        t1: RealScalarLike,
+        y1: Y,
+        args: Args,
+        ts_state: PyTree[RealScalarLike],
+        solver_state: Y,
+        made_jump: BoolScalarLike,
+    ) -> tuple[Y, DenseInfo, Y, RESULTS]:
+        del ts_state
+        y0, _, dense_info, solver_state, result = self.step(
+            terms, t1, t0, y1, args, solver_state, made_jump
+        )
+        return y0, dense_info, solver_state, result

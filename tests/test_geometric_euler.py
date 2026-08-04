@@ -4,7 +4,6 @@ import diffrax
 import jax
 import jax.numpy as jnp
 import lineax as lx
-from diffrax._solver.base import AbstractItoSolver
 
 from georax import SO, Euclidean, GeometricEuler, GeometricTerm
 
@@ -55,7 +54,7 @@ def test_geometric_euler_maruyama_preserves_so3() -> None:
     )
 
     solver = GeometricEuler()
-    assert isinstance(solver, AbstractItoSolver)
+    assert isinstance(solver, diffrax.AbstractItoSolver)
     assert solver.strong_order(terms) == 0.5
 
     out = diffrax.diffeqsolve(
