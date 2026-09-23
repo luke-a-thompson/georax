@@ -40,7 +40,7 @@ classifiers = [
 ]
 dependencies = [
     "diffrax @ git+https://github.com/sammccallum/diffrax@aeb1335b5a6278e85a270231e0f97b8db4453ae6",
-    "diffrax-lowstorage @ git+https://github.com/luke-a-thompson/diffrax-lowstorage.git@dc3a519919a634701c9cbb8cb5afc5f9d102a757",
+    "diffrax-lowstorage @ git+https://github.com/luke-a-thompson/diffrax-lowstorage.git@461f7726541c78e5f8f2359ee360910dccf762a8",
     "equinox>=0.13.0",
     "jax>=0.4.38",
     "jaxtyping>=0.3.0",
