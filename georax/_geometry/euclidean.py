@@ -7,12 +7,6 @@ from .base import FrameCoords, LocalChart, Manifold, StateArray
 
 
 class EuclideanChart(LocalChart["Euclidean"]):
-    order: int
-
-    def __init__(self, order: int):
-        del order
-        object.__setattr__(self, "order", 12)
-
     def apply(self, x: Array, a: FrameCoords, geometry: Euclidean) -> Array:
         del geometry
         return x + a

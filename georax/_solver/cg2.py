@@ -3,12 +3,12 @@ from __future__ import annotations
 from typing import ClassVar, override
 
 import numpy as np
+from diffrax import AbstractTerm
 
 from georax._solver.commutator_free import (
     AbstractCommutatorFreeSolver,
     CommutatorFreeTableau,
 )
-from georax._term import GeometricTerm
 
 _cg2_tableau = CommutatorFreeTableau(
     c=(0.0, 0.5),
@@ -42,6 +42,6 @@ class CG2(AbstractCommutatorFreeSolver):
     tableau: ClassVar[CommutatorFreeTableau] = _cg2_tableau
 
     @override
-    def order(self, terms: GeometricTerm) -> int:
+    def order(self, terms: AbstractTerm) -> int:
         del terms
         return 2

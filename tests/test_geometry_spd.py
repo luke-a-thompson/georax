@@ -20,25 +20,25 @@ def _is_spd(x: jnp.ndarray) -> bool:
 
 def test_spd_increment_stays_in_spd() -> None:
     spd = SPD(2)
-    spd.select_chart(12)
+    chart = spd.select_chart(12)
     x = jnp.array([[2.0, 0.3], [0.3, 1.4]])
     a = jnp.array([0.2, -0.1, 0.35])
 
-    y = spd.apply_increment(x, a)
+    y = spd.apply_increment(x, a, chart)
 
     assert _is_spd(y)
 
 
 def test_spd_increment_matches_first_order_tangent_step() -> None:
     spd = SPD(2)
-    spd.select_chart(12)
+    chart = spd.select_chart(12)
     x = jnp.array([[1.8, 0.2], [0.2, 1.3]])
     a = jnp.array([0.4, -0.15, 0.25])
     lift = spd._coords_to_sym(a)
     v = lift @ x + x @ lift
     eps = 1e-4
 
-    y = spd.apply_increment(x, eps * a)
+    y = spd.apply_increment(x, eps * a, chart)
 
     assert bool(jnp.allclose(y, x + eps * v, atol=1e-7, rtol=1e-4))
 

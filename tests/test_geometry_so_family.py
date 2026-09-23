@@ -9,11 +9,11 @@ from georax import SO
 
 def test_so_increment_stays_on_group() -> None:
     so5 = SO(5)
-    so5.select_chart(12)
+    chart = so5.select_chart(12)
     x = jnp.eye(5)
     a = jnp.linspace(-0.2, 0.2, so5.coordinate_shape[0])
 
-    y = so5.apply_increment(x, a)
+    y = so5.apply_increment(x, a, chart)
 
     assert bool(jnp.allclose(y.T @ y, jnp.eye(5), atol=1e-6))
     assert float(jnp.linalg.det(y)) > 0.0
@@ -36,28 +36,27 @@ def test_so_frame_bracket_matches_matrix_commutator(n: int) -> None:
 
 def test_so_rejects_wrong_state_shape() -> None:
     so3 = SO(3)
-    so3.select_chart(2)
+    chart = so3.select_chart(2)
 
     with pytest.raises(ValueError, match=r"SO state must have shape \(3, 3\)"):
-        so3.apply_increment(jnp.ones(4), jnp.zeros(3))
+        so3.apply_increment(jnp.ones(4), jnp.zeros(3), chart)
 
 
 def test_so_rejects_wrong_coordinate_shape() -> None:
     so3 = SO(3)
-    so3.select_chart(2)
+    chart = so3.select_chart(2)
 
     with pytest.raises(ValueError, match=r"SO coordinates must have shape \(3,\)"):
-        so3.apply_increment(jnp.eye(3), jnp.zeros((3, 3)))
+        so3.apply_increment(jnp.eye(3), jnp.zeros((3, 3)), chart)
 
 
 def test_chart_inverse_differential_is_identity_at_zero() -> None:
     so3 = SO(3)
-    so3.select_chart(2)
+    chart = so3.select_chart(2)
     omega = jnp.zeros(so3.coordinate_shape)
     eta = jnp.array([0.3, -0.4, 0.2])
-    assert so3.chart is not None
 
-    corrected = so3.chart.inverse_differential(jnp.eye(3), omega, eta, so3)
+    corrected = chart.inverse_differential(jnp.eye(3), omega, eta, so3)
     assert bool(jnp.allclose(corrected, eta))
 
 

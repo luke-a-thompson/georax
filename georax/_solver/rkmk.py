@@ -1,23 +1,27 @@
 from __future__ import annotations
 
-from typing import override
+from collections.abc import Callable
+from typing import ClassVar, override
 
 import equinox as eqx
 from diffrax import (
     RESULTS,
     AbstractERK,
-    AbstractSolver,
+    AbstractTerm,
     AbstractWrappedSolver,
-    LocalLinearInterpolation,
 )
-from georax._compat import Args, BoolScalarLike, DenseInfo, RealScalarLike, VF, Y
+
+from georax._compat import VF, Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
 from georax._term import (
     GeometricTerm,
+    Pullback,
     PulledDriftTerm,
     find_geometry,
     select_chart_for_solver,
-    unwrap_term,
 )
+
+from ._interpolation import GeometricInterpolation
+from ._pullback import pullback_step
 
 
 class RKMK(AbstractWrappedSolver):
@@ -58,9 +62,14 @@ class RKMK(AbstractWrappedSolver):
         ```
     """
 
-    solver: AbstractSolver = eqx.field(static=True)
+    # Equinox freezes this field; it implements Diffrax's AbstractVar.
+    solver: AbstractERK = eqx.field(static=True)  # pyright: ignore[reportIncompatibleVariableOverride]
+    term_structure: ClassVar[type[GeometricTerm]] = GeometricTerm
+    interpolation_cls: ClassVar[Callable[..., GeometricInterpolation]] = (
+        GeometricInterpolation
+    )
 
-    def __init__(self, solver: AbstractSolver):
+    def __init__(self, solver: AbstractERK) -> None:
         if not isinstance(solver, AbstractERK):
             raise TypeError("RKMK requires a base explicit Runge-Kutta solver.")
         # FSAL caches the previous step's last stage as f0 of the next, but
@@ -70,36 +79,26 @@ class RKMK(AbstractWrappedSolver):
         solver = eqx.tree_at(lambda s: s.disable_fsal, solver, True)
         object.__setattr__(self, "solver", solver)
 
-    @property
-    def term_structure(self):  # pyright: ignore
-        return GeometricTerm
-
-    @property
-    def interpolation_cls(self):  # pyright: ignore
-        # Stages live in the algebra; do not inherit Euclidean Hermite
-        # interpolation from the wrapped solver.
-        return LocalLinearInterpolation
-
-    def order(self, terms) -> int | None:
+    def order(self, terms: AbstractTerm) -> int | None:
         return self.solver.order(terms)
 
     @override
     def init(
         self,
-        terms: GeometricTerm,
+        terms: AbstractTerm,
         t0: RealScalarLike,
         t1: RealScalarLike,
         y0: Y,
         args: Args,
     ) -> None:
-        del t0, t1, y0, args
-        select_chart_for_solver(self, terms, find_geometry(terms), pullback=True)
+        del t0, t1, args
+        find_geometry(terms).check_state_shape(y0)
         return None
 
     @override
     def func(
         self,
-        terms: GeometricTerm,
+        terms: AbstractTerm,
         t0: RealScalarLike,
         y0: Y,
         args: Args,
@@ -109,7 +108,7 @@ class RKMK(AbstractWrappedSolver):
     @override
     def step(
         self,
-        terms: GeometricTerm,
+        terms: AbstractTerm,
         t0: RealScalarLike,
         t1: RealScalarLike,
         y0: Y,
@@ -119,29 +118,15 @@ class RKMK(AbstractWrappedSolver):
     ) -> tuple[Y, Y | None, DenseInfo, None, RESULTS]:
         del solver_state
 
-        base_term = unwrap_term(terms)
-        if not isinstance(base_term, GeometricTerm):
-            raise TypeError("RKMK requires a geometric drift term.")
-        geometry = base_term.geometry
-
-        algebra_term = PulledDriftTerm(base_term, y0)
-        omega0 = geometry.zero_coordinates(y0)
-
-        omega1, omega_error, _, _, result = self.solver.step(
-            algebra_term,
+        geometry = find_geometry(terms)
+        chart = select_chart_for_solver(self, terms, geometry, pullback=True)
+        pullback = Pullback(geometry, chart, y0)
+        return pullback_step(
+            self.solver,
+            PulledDriftTerm(terms, pullback),
+            pullback,
             t0,
             t1,
-            omega0,
             args,
-            None,
             made_jump,
         )
-        y1 = geometry.apply_increment(y0, omega1)
-
-        y_error = None
-        if omega_error is not None:
-            y_hat = geometry.apply_increment(y0, omega1 + omega_error)
-            y_error = y_hat - y1
-
-        dense_info = dict(y0=y0, y1=y1)
-        return y1, y_error, dense_info, None, result

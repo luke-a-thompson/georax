@@ -32,6 +32,8 @@ Georax provides geometric numerical integrators for the [Diffrax](https://github
 
 `GeometricTerm` is intrinsic: its vector field returns frame or Lie-algebra coordinates, not an ambient tangent matrix.
 
+Direct geometry calls take an explicit chart: `geometry.apply_increment(x, a, geometry.select_chart(order))`. Chart selection does not modify the geometry.
+
 ## Usage
 
 ```python
@@ -78,6 +80,8 @@ uv sync --extra dev
 ## Limitations
 
 `RKMK` requires the selected chart to implement the inverse differential needed by the wrapped solver. On `SO(n)`, it uses the Cayley transform as an exact local coordinate map, together with its closed-form inverse differential, at every wrapped solver order. This is distinct from using Cayley as an order-2 approximation to the exponential in a retraction method; see [Iserles and Zanna's Cayley-transform RKMK construction](https://doi.org/10.1112/S1461157000000206). Other geometries and charts use a generic dense-Jacobian fallback, which is accurate but can be expensive in high dimensions.
+
+Intermediate saved samples and dense output preserve the manifold through chart interpolation, but do not inherit the solver's high-order accuracy between steps.
 
 `CFEES25` and `CFEES27` are the commutator-free EES schemes from Shmelev, Thompson, and Salvi. They support both ODEs and SDEs, are O(1)-reversible, and converge to the Stratonovich solution for SDEs. The `CFEES25` coefficients correspond to `EES(2,5;1/10)`.
 

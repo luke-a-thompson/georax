@@ -1,8 +1,8 @@
 from typing import ClassVar, override
 
 import numpy as np
+from diffrax import AbstractTerm
 
-from georax._term import GeometricTerm
 from georax._solver.commutator_free import (
     AbstractCommutatorFreeSolver,
     CommutatorFreeTableau,
@@ -67,6 +67,6 @@ class CG4(AbstractCommutatorFreeSolver):
     tableau: ClassVar[CommutatorFreeTableau] = _cg4_tableau
 
     @override
-    def order(self, terms: GeometricTerm) -> int:
+    def order(self, terms: AbstractTerm) -> int:
         del terms
         return 4

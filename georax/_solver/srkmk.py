@@ -1,35 +1,46 @@
 from __future__ import annotations
 
-from typing import override
+from collections.abc import Callable
+from typing import Any, ClassVar, override
 
 import equinox as eqx
 from diffrax import (
     RESULTS,
+    AbstractBrownianIncrement,
     AbstractSRK,
-    AbstractSolver,
     AbstractTerm,
     AbstractWrappedSolver,
-    LocalLinearInterpolation,
     MultiTerm,
     StochasticButcherTableau,
 )
+
 from georax._compat import (
+    VF,
     AdditiveCoeffs,
     Args,
     BoolScalarLike,
     DenseInfo,
     GeneralCoeffs,
     RealScalarLike,
-    VF,
+    WrapTerm,
     Y,
 )
 from georax._term import (
     GeometricTerm,
+    Pullback,
     PulledDiffusionTerm,
     PulledDriftTerm,
+    find_geometry,
     select_chart_for_solver,
     unwrap_term,
 )
+
+from ._interpolation import GeometricInterpolation
+from ._pullback import pullback_step
+
+SRKTerms = MultiTerm[
+    tuple[AbstractTerm[VF, RealScalarLike], AbstractTerm[VF, AbstractBrownianIncrement]]
+]
 
 
 class SRKMK(AbstractWrappedSolver):
@@ -60,27 +71,36 @@ class SRKMK(AbstractWrappedSolver):
         ```
     """
 
-    solver: AbstractSolver = eqx.field(static=True)
-    tableau: StochasticButcherTableau = eqx.field(static=True)
+    # Equinox freezes this field; it implements Diffrax's AbstractVar.
+    solver: AbstractSRK = eqx.field(static=True)  # pyright: ignore[reportIncompatibleVariableOverride]
+    term_structure: ClassVar[type[MultiTerm[tuple[GeometricTerm, AbstractTerm]]]] = (
+        MultiTerm[tuple[GeometricTerm, AbstractTerm]]
+    )
+    interpolation_cls: ClassVar[Callable[..., GeometricInterpolation]] = (
+        GeometricInterpolation
+    )
+    term_compatible_contr_kwargs: ClassVar[tuple[dict[str, bool], dict[str, bool]]] = (
+        {},
+        {"use_levy": True},
+    )
     is_additive: bool = eqx.field(static=True)
     additive_after_pullback: bool = eqx.field(static=True)
 
     def __init__(
         self,
-        solver: AbstractSolver,
+        solver: AbstractSRK,
         *,
         additive_after_pullback: bool = False,
-    ):
+    ) -> None:
         if not isinstance(solver, AbstractSRK):
             raise TypeError("SRKMK requires a base stochastic Runge--Kutta solver.")
 
         tableau = solver.tableau
-        coeffs = [
+        coeffs = (
             tableau.coeffs_w,
             tableau.coeffs_hh,
             tableau.coeffs_kk,
-        ]
-        coeffs = [coeff for coeff in coeffs if coeff is not None]
+        )
 
         uses_additive = any(isinstance(coeff, AdditiveCoeffs) for coeff in coeffs)
         uses_general = any(isinstance(coeff, GeneralCoeffs) for coeff in coeffs)
@@ -91,58 +111,48 @@ class SRKMK(AbstractWrappedSolver):
             )
 
         object.__setattr__(self, "solver", solver)
-        object.__setattr__(self, "tableau", tableau)
         object.__setattr__(self, "is_additive", uses_additive)
         object.__setattr__(self, "additive_after_pullback", additive_after_pullback)
 
     @property
-    def term_structure(self):  # pyright: ignore
-        return MultiTerm[tuple[GeometricTerm, AbstractTerm]]
+    def tableau(self) -> StochasticButcherTableau:
+        return self.solver.tableau
 
     @property
-    def term_compatible_contr_kwargs(self):  # pyright: ignore
-        return (dict(), dict(use_levy=True))
-
-    @property
-    def interpolation_cls(self):  # pyright: ignore
-        # Keep this conservative. SRKMK dense output should not inherit any
-        # Euclidean RK Hermite interpolation without geometric reconstruction.
-        return LocalLinearInterpolation
-
-    @property
-    def minimal_levy_area(self):  # pyright: ignore
+    def minimal_levy_area(self) -> type[AbstractBrownianIncrement]:
         return self.solver.minimal_levy_area
 
-    def order(self, terms) -> int | None:
+    def order(self, terms: AbstractTerm) -> int | None:
         return self.solver.order(terms)
 
-    def strong_order(self, terms):
+    def strong_order(self, terms: AbstractTerm) -> RealScalarLike | None:
         return self.solver.strong_order(terms)
 
     @staticmethod
-    def _split_terms(terms) -> tuple[GeometricTerm, AbstractTerm]:
-        terms = unwrap_term(terms)
+    def _split_terms(terms: AbstractTerm) -> tuple[AbstractTerm, AbstractTerm]:
+        if isinstance(terms, WrapTerm):
+            drift, diffusion = SRKMK._split_terms(terms.term)
+            return WrapTerm(drift, terms.direction), WrapTerm(
+                diffusion, terms.direction
+            )
         if not isinstance(terms, MultiTerm) or len(terms.terms) != 2:
             raise TypeError(
                 "SRKMK expects terms = MultiTerm(drift_term, diffusion_term)."
             )
         drift_term, diffusion_term = terms.terms
-        drift_term = unwrap_term(drift_term)
-        if not isinstance(drift_term, GeometricTerm):
+        if not isinstance(unwrap_term(drift_term), GeometricTerm):
             raise TypeError("SRKMK requires a geometric drift term.")
         return drift_term, diffusion_term
 
     @override
     def init(
         self,
-        terms,
+        terms: AbstractTerm,
         t0: RealScalarLike,
         t1: RealScalarLike,
         y0: Y,
         args: Args,
     ) -> None:
-        drift_term, diffusion_term = self._split_terms(terms)
-
         if self.is_additive and not self.additive_after_pullback:
             raise TypeError(
                 "This SRK tableau assumes additive noise. For SRKMK this means "
@@ -151,28 +161,26 @@ class SRKMK(AbstractWrappedSolver):
                 "you have ensured this."
             )
 
-        # Chart selection is delegated to the geometry. For exponential-style
-        # charts this should be conservative enough to satisfy the SRKMK
-        # truncation condition for the wrapped method.
-        select_chart_for_solver(self, terms, drift_term.geometry)
-
-        # Defer to the wrapped SRK's init for any trace-time validation. For
-        # additive tableaus this performs a JVP check that the (pulled-back)
-        # diffusion is independent of the algebra state — i.e. it catches a
-        # false ``additive_after_pullback=True`` claim. For general tableaus
-        # AbstractSRK.init is a no-op.
-        omega0 = drift_term.geometry.zero_coordinates(y0)
-        algebra_terms = MultiTerm(
-            PulledDriftTerm(drift_term, y0),
-            PulledDiffusionTerm(drift_term, diffusion_term, y0, omega0),
-        )
-        self.solver.init(algebra_terms, t0, t1, omega0, args)
+        pullback, algebra_terms = self._local_terms(terms, y0)
+        self.solver.init(algebra_terms, t0, t1, pullback.zero(), args)
         return None
+
+    def _local_terms(
+        self, terms: AbstractTerm, y0: Y
+    ) -> tuple[Pullback[Any], SRKTerms]:
+        drift, diffusion = self._split_terms(terms)
+        geometry = find_geometry(drift)
+        chart = select_chart_for_solver(self, terms, geometry, pullback=True)
+        pullback = Pullback(geometry, chart, y0)
+        return pullback, MultiTerm(
+            PulledDriftTerm(drift, pullback),
+            PulledDiffusionTerm(diffusion, pullback),
+        )
 
     @override
     def func(
         self,
-        terms,
+        terms: AbstractTerm,
         t0: RealScalarLike,
         y0: Y,
         args: Args,
@@ -183,7 +191,7 @@ class SRKMK(AbstractWrappedSolver):
     @override
     def step(
         self,
-        terms,
+        terms: AbstractTerm,
         t0: RealScalarLike,
         t1: RealScalarLike,
         y0: Y,
@@ -193,33 +201,7 @@ class SRKMK(AbstractWrappedSolver):
     ) -> tuple[Y, Y | None, DenseInfo, None, RESULTS]:
         del solver_state
 
-        drift_term, diffusion_term = self._split_terms(terms)
-        geometry = drift_term.geometry
-        chart = geometry.chart
-        if chart is None:
-            raise TypeError("SRKMK requires a geometry with a selected chart.")
-
-        omega0 = geometry.zero_coordinates(y0)
-        algebra_terms = MultiTerm(
-            PulledDriftTerm(drift_term, y0),
-            PulledDiffusionTerm(drift_term, diffusion_term, y0, omega0),
+        pullback, algebra_terms = self._local_terms(terms, y0)
+        return pullback_step(
+            self.solver, algebra_terms, pullback, t0, t1, args, made_jump
         )
-
-        omega1, omega_error, _, _, result = self.solver.step(
-            algebra_terms,
-            t0,
-            t1,
-            omega0,
-            args,
-            None,
-            made_jump,
-        )
-        y1 = geometry.apply_increment(y0, omega1)
-
-        y_error = None
-        if omega_error is not None:
-            y_hat = geometry.apply_increment(y0, omega1 + omega_error)
-            y_error = y_hat - y1
-
-        dense_info = dict(y0=y0, y1=y1)
-        return y1, y_error, dense_info, None, result
