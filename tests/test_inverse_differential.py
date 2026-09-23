@@ -3,7 +3,7 @@ from __future__ import annotations
 import diffrax
 import jax
 import jax.numpy as jnp
-from conftest import make_solver_accuracy_ambient_term, make_solver_accuracy_term
+from _problems import make_solver_accuracy_ambient_term, make_solver_accuracy_term
 
 from georax import CG4, RKMK, SO
 

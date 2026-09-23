@@ -16,9 +16,9 @@ from georax import (
     CG4,
     RKMK,
     SO,
+    SRKMK,
     Euclidean,
     GeometricTerm,
-    SRKMK,
 )
 
 BENCH_SOLVERS = [("cg2", CG2), ("cg4", CG4), ("cfees25", CFEES25), ("cfees27", CFEES27)]
