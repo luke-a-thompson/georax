@@ -83,8 +83,10 @@ sol = diffrax.diffeqsolve(
 
 ## Install
 
+From a checkout, including the required pinned Diffrax fork:
+
 ```bash
-pip install georax
+pip install .
 ```
 
 For development:
