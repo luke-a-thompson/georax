@@ -119,10 +119,11 @@ dependencies = [
 [[package]]
 name = "diffrax-lowstorage"
 version = "0.1.0"
-source = { git = "https://github.com/luke-a-thompson/diffrax-lowstorage.git?rev=dc3a519919a634701c9cbb8cb5afc5f9d102a757#dc3a519919a634701c9cbb8cb5afc5f9d102a757" }
+source = { git = "https://github.com/luke-a-thompson/diffrax-lowstorage.git?rev=3f72fe75660ed325bfc35086239950c73c3e98c8#3f72fe75660ed325bfc35086239950c73c3e98c8" }
 dependencies = [
     { name = "diffrax" },
     { name = "jax" },
+    { name = "typing-extensions" },
 ]
 
 [[package]]
@@ -222,7 +223,7 @@ dev = [
 requires-dist = [
     { name = "basedpyright", marker = "extra == 'dev'" },
     { name = "diffrax", git = "https://github.com/sammccallum/diffrax?rev=aeb1335b5a6278e85a270231e0f97b8db4453ae6" },
-    { name = "diffrax-lowstorage", git = "https://github.com/luke-a-thompson/diffrax-lowstorage.git?rev=dc3a519919a634701c9cbb8cb5afc5f9d102a757" },
+    { name = "diffrax-lowstorage", git = "https://github.com/luke-a-thompson/diffrax-lowstorage.git?rev=3f72fe75660ed325bfc35086239950c73c3e98c8" },
     { name = "equinox", specifier = ">=0.13.0" },
     { name = "fbm", marker = "extra == 'dev'" },
     { name = "jax", specifier = ">=0.4.38" },
