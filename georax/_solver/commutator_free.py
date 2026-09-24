@@ -8,11 +8,13 @@ import jax.numpy as jnp
 import numpy as np
 from diffrax import (
     RESULTS,
+    AbstractReversibleSolver,
     AbstractSolver,
+    AbstractStratonovichSolver,
     AbstractTerm,
 )
 from diffrax_lowstorage import LowStorageRecurrence
-from jaxtyping import Array
+from jaxtyping import Array, PyTree
 from numpy.typing import NDArray
 
 from georax._compat import VF, Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
@@ -276,3 +278,69 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
 
         dense_info = geometric_dense_info(y0, y1, increments, geometry, chart)
         return y1, y_error, dense_info, None, RESULTS.successful
+
+
+class _AbstractCFEES(
+    AbstractLowStorageCommutatorFreeSolver,
+    AbstractReversibleSolver,
+    AbstractStratonovichSolver,
+):
+    """Shared reversible solver state and orders for the CF-EES family."""
+
+    embedded_final_increment: ClassVar[bool] = True
+
+    @override
+    def init(
+        self,
+        terms: AbstractTerm,
+        t0: RealScalarLike,
+        t1: RealScalarLike,
+        y0: Y,
+        args: Args,
+    ) -> Y:
+        super().init(terms, t0, t1, y0, args)
+        return y0
+
+    @override
+    def order(self, terms: AbstractTerm) -> int:
+        del terms
+        return 2
+
+    def strong_order(self, terms: AbstractTerm) -> float:
+        del terms
+        return 0.5
+
+    @override
+    def step(
+        self,
+        terms: AbstractTerm,
+        t0: RealScalarLike,
+        t1: RealScalarLike,
+        y0: Y,
+        args: Args,
+        solver_state: Y,
+        made_jump: BoolScalarLike,
+    ) -> tuple[Y, Y | None, DenseInfo, Y, RESULTS]:
+        del solver_state
+        y1, y_error, dense_info, _, result = super().step(
+            terms, t0, t1, y0, args, None, made_jump
+        )
+        return y1, y_error, dense_info, y1, result
+
+    @override
+    def backward_step(
+        self,
+        terms: PyTree[AbstractTerm],
+        t0: RealScalarLike,
+        t1: RealScalarLike,
+        y1: Y,
+        args: Args,
+        ts_state: PyTree[RealScalarLike],
+        solver_state: Y,
+        made_jump: BoolScalarLike,
+    ) -> tuple[Y, DenseInfo, Y, RESULTS]:
+        del ts_state
+        y0, _, dense_info, solver_state, result = self.step(
+            terms, t1, t0, y1, args, solver_state, made_jump
+        )
+        return y0, dense_info, solver_state, result
