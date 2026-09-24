@@ -343,4 +343,10 @@ class _AbstractCFEES(
         y0, _, dense_info, solver_state, result = self.step(
             terms, t1, t0, y1, args, solver_state, made_jump
         )
+        # ReversibleAdjoint differentiates saved observations using a forward
+        # interpolator. Rebuild its increments at the reconstructed start state;
+        # the reverse step's chart path has a different anchor and stage order.
+        _, _, dense_info, _, _ = self.step(
+            terms, t0, t1, y0, args, solver_state, made_jump
+        )
         return y0, dense_info, solver_state, result

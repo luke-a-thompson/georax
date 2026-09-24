@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, ClassVar, override
+from typing import Any, ClassVar, Literal, override
 
 import equinox as eqx
 from diffrax import (
@@ -95,6 +95,13 @@ class SRKMK(AbstractWrappedSolver):
         if not isinstance(solver, AbstractSRK):
             raise TypeError("SRKMK requires a base stochastic Runge--Kutta solver.")
 
+        # A fixed-length lax scan supports both differentiation modes. Diffrax's
+        # adjoints inspect scan_kind on wrappers, so expose the selected setting.
+        if solver.scan_kind is None:
+            solver = eqx.tree_at(
+                lambda s: s.scan_kind, solver, "lax", is_leaf=lambda x: x is None
+            )
+
         tableau = solver.tableau
         coeffs = (
             tableau.coeffs_w,
@@ -113,6 +120,10 @@ class SRKMK(AbstractWrappedSolver):
         object.__setattr__(self, "solver", solver)
         object.__setattr__(self, "is_additive", uses_additive)
         object.__setattr__(self, "additive_after_pullback", additive_after_pullback)
+
+    @property
+    def scan_kind(self) -> Literal["lax", "checkpointed"] | None:
+        return self.solver.scan_kind
 
     @property
     def tableau(self) -> StochasticButcherTableau:

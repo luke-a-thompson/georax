@@ -27,12 +27,44 @@ Georax provides geometric numerical integrators for the [Diffrax](https://github
 | Class | State | Coordinates | Chart |
 |-------|-------|-------------|-------|
 | `Euclidean()` | Any array | Same as state | Addition |
+| `Euclidean(shape)` | Array with the specified shape | Same as state | Addition |
+| `Torus(d)` | `(d,)` angles in `[-pi, pi)` | `(d,)` angular increments | Exact wrapped addition |
+| `TangentTorus(n)` | `(2 * n,)`, packed as `[theta, omega]` | `(2 * n,)` increments | Product of wrapped and ordinary addition |
+| `Sphere(n)` | `(..., n)` unit vectors in R^n | `(..., n * (n - 1) // 2)` skew coordinates | SO(n) rotation action, with Cayley or Taylor+QR |
 | `SO(n)` | `(n, n)` rotation matrix | `n * (n - 1) // 2` skew coordinates | Cayley at order 2, Taylor+QR at higher orders |
 | `SPD(n)` | `(n, n)` symmetric positive-definite matrix | `n * (n + 1) // 2` symmetric coordinates | Congruence action via truncated exponential |
+| `Product(*factors)` | Flat concatenation of factor states | Flat concatenation of factor coordinates | Componentwise factor charts |
 
 `GeometricTerm` is intrinsic: its vector field returns frame or Lie-algebra coordinates, not an ambient tangent matrix.
 
 Direct geometry calls take an explicit chart: `geometry.apply_increment(x, a, geometry.select_chart(order))`. Chart selection does not modify the geometry.
+
+`Sphere(n)` denotes the sphere of dimension `n - 1`. Its skew coordinates fill the strictly lower triangle in row order: `(1, 0), (2, 0), (2, 1), (3, 0), ...`, with the negative transpose in the upper triangle. The infinitesimal action is `A @ x`. This differs from `SO(n)`, which retains its upper-triangular coordinate convention and action `x @ A`. Sphere generators are redundant: `trivialise(x, v)` chooses the lift `v x.T - x v.T`, and `detrivialise(x, trivialise(x, v)) == v` for tangent vectors at unit states. A sphere accepts leading batch dimensions and either shared or per-state rotation coefficients.
+
+### Product geometries
+
+`Product(SPD(2), Torus(3), SO(3))` composes the existing geometries without changing the solvers. Use `pack_state` and `unpack_state` to move between the flat solver state and the factor arrays, and `pack_coordinates` and `unpack_coordinates` for vector-field coefficients. State and coordinate lengths may differ. Factors must have fixed shapes, so use `Euclidean(n)` or `Euclidean((m, n))` inside a product. Products can be nested; `unpack_state(sol.ys)` retains the leading observation axis. Use `jax.vmap` to batch complete product solves.
+
+`TangentTorus(n)` is a convenience subclass of `Product(Torus(n), Euclidean(n))`, with no separate geometric implementation. A model can couple the factors while the geometry handles their charts:
+
+```python
+import jax.numpy as jnp
+
+from georax import GeometricTerm, TangentTorus
+
+geometry = TangentTorus(3)
+y0 = geometry.pack_state(jnp.zeros(3), jnp.ones(3))
+
+
+def rotor_coeffs(t, y, damping):
+    theta, omega = geometry.unpack_state(y)
+    return geometry.pack_coordinates(omega, -jnp.sin(theta) - damping * omega)
+
+
+term = GeometricTerm(rotor_coeffs, geometry)
+```
+
+Only the phase components are wrapped. Torus charts use exact addition modulo `2 * pi` at every requested order. Derivatives of angular representatives are local to the chosen branch; periodic observables such as sine and cosine avoid branch discontinuities. Product charts preserve each factor's pullback selection and keep all chart orders static for reversible adjoints.
 
 ## Usage
 
@@ -97,7 +129,7 @@ uv sync --extra dev
 
 ## Limitations
 
-`RKMK` requires the selected chart to implement the inverse differential needed by the wrapped solver. On `SO(n)`, it uses the Cayley transform as an exact local coordinate map, together with its closed-form inverse differential, at every wrapped solver order. This is distinct from using Cayley as an order-2 approximation to the exponential in a retraction method; see [Iserles and Zanna's Cayley-transform RKMK construction](https://doi.org/10.1112/S1461157000000206). Other geometries and charts use a generic dense-Jacobian fallback, which is accurate but can be expensive in high dimensions.
+`RKMK` requires the selected chart to implement the inverse differential needed by the wrapped solver. On `SO(n)` and `Sphere(n)`, it uses the Cayley transform as an exact local coordinate map, together with its closed-form inverse differential, at every wrapped solver order. Sphere pullbacks operate through SO(n), avoiding the singular Jacobian of redundant sphere generators. This is distinct from using Cayley as an order-2 approximation to the exponential in a retraction method; see [Iserles and Zanna's Cayley-transform RKMK construction](https://doi.org/10.1112/S1461157000000206). Products delegate inverse differentials to their factors. Other geometries and charts use a generic dense-Jacobian fallback, which is accurate but can be expensive in high dimensions.
 
 Intermediate saved samples and dense output preserve the manifold through chart interpolation, but do not inherit the solver's high-order accuracy between steps.
 
