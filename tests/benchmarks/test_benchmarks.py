@@ -6,7 +6,7 @@ import diffrax
 import jax
 import jax.numpy as jnp
 import pytest
-from _benchmarks import BENCH_CASES, BenchCase, bench_solvers_for_case
+from _cases import BENCH_CASES, BenchCase, bench_solvers_for_case
 from jaxtyping import PyTree
 
 from georax import GeometricTerm
