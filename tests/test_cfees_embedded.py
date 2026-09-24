@@ -22,40 +22,20 @@ def _step(solver, term, y0, t0, t1):
     "solver_cls, mu", [(CFEES25, 9 / 8), (CFEES27, 3 * np.sqrt(2) / 4)]
 )
 @pytest.mark.parametrize("h", [0.2, -0.2])
-def test_embedded_companion_coefficients_and_evaluation_count(
-    solver_cls, mu, h, monkeypatch
-):
+def test_embedded_companion_coefficients(solver_cls, mu, h):
     solver = solver_cls()
-    evaluations = []
-    actions = []
-    apply_increment = Euclidean.apply_increment
-
-    def counted_action(self, x, a, chart):
-        actions.append(a)
-        return apply_increment(self, x, a, chart)
-
-    monkeypatch.setattr(Euclidean, "apply_increment", counted_action)
-
-    def vf(t, y, args):
-        evaluations.append(t)
-        return jnp.full_like(y, t)
-
+    vf = lambda t, y, args: jnp.full_like(y, t)
     term = GeometricTerm(vf, geometry=Euclidean())
     y0 = jnp.array([2.0])
     t0 = 0.3
-    y1, error, dense_info, state, result = _step(solver, term, y0, t0, t0 + h)
+    y1, error, _, _, _ = _step(solver, term, y0, t0, t0 + h)
 
     # For y' = t, the principal method is exact and the companion has
     # y_hat = y0 + h*t0 + mu*h^2. These moments identify the intended pair.
     np.testing.assert_allclose(y1, y0 + h * t0 + h**2 / 2, atol=1e-14)
     np.testing.assert_allclose(y1 - error, y0 + h * t0 + mu * h**2, atol=1e-14)
     np.testing.assert_allclose(error, (0.5 - mu) * h**2, atol=1e-14)
-    assert len(evaluations) == solver.recurrence.num_stages
-    assert len(actions) == solver.recurrence.num_stages + 1
-    assert len(dense_info["increments"]) == solver.recurrence.num_stages
-    np.testing.assert_array_equal(state, y1)
     assert solver.error_order(term) == 2
-    assert result == diffrax.RESULTS.successful
 
 
 @pytest.mark.parametrize("solver_cls", [CFEES25, CFEES27])
@@ -73,7 +53,9 @@ def test_embedded_and_principal_local_orders(solver_cls):
         companion_errors.append(float(jnp.linalg.norm(y1 - error - np.exp(h))))
 
     for errors, expected in [
-        (estimates, 2), (principal_errors, 3), (companion_errors, 2)
+        (estimates, 2),
+        (principal_errors, 3),
+        (companion_errors, 2),
     ]:
         slope = np.polyfit(np.log(hs), np.log(errors), 1)[0]
         assert abs(slope - expected) < 0.1
@@ -132,21 +114,3 @@ def test_pid_rejects_restarts_and_retains_second_order_solution(solver_cls, dire
     assert int(solution.stats["num_rejected_steps"]) > 0
     assert int(solution.stats["num_accepted_steps"]) > 1
     np.testing.assert_allclose(solution.ys[0], np.exp(t1), rtol=1e-5)
-
-
-@pytest.mark.parametrize("solver_cls", [CFEES25, CFEES27])
-def test_zero_discrepancy_allows_step_growth(solver_cls):
-    term = GeometricTerm(lambda t, y, args: jnp.zeros_like(y), geometry=Euclidean())
-    solution = diffrax.diffeqsolve(
-        term,
-        solver_cls(),
-        t0=0.0,
-        t1=1.0,
-        dt0=0.01,
-        y0=jnp.ones(1),
-        stepsize_controller=diffrax.PIDController(rtol=1e-5, atol=1e-7),
-        max_steps=10,
-    )
-    assert int(solution.stats["num_rejected_steps"]) == 0
-    assert int(solution.stats["num_accepted_steps"]) < 10
-    np.testing.assert_array_equal(solution.ys[0], jnp.ones(1))

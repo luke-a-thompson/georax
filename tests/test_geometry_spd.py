@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import diffrax
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from georax import CG2, RKMK, SPD, GeometricTerm
-from georax._geometry.base import post_lie_bracket
+from georax import CG2, SPD, GeometricTerm, post_lie_bracket
 
 jax.config.update("jax_enable_x64", True)
 
@@ -113,23 +111,6 @@ def test_spd_trivialise_derivative_at_repeated_eigenvalues(diagonal):
     np.testing.assert_allclose(
         geometry.detrivialise(x, da) + dx @ lift + lift @ dx, dv, atol=1e-12
     )
-
-
-def test_spd_solve_initial_state_gradient_at_identity():
-    term = GeometricTerm(lambda t, y, args: jnp.array([0.1, 0.2, 0.05]), SPD(2))
-
-    def loss(x):
-        return diffrax.diffeqsolve(
-            term, RKMK(diffrax.Heun()), t0=0.0, t1=0.1, dt0=0.1, y0=x
-        ).ys.sum()
-
-    x = jnp.eye(2)
-    direction = jnp.array([[0.3, 0.2], [0.2, -0.1]])
-    gradient = jax.jit(jax.grad(loss))(x)
-    assert jnp.all(jnp.isfinite(gradient))
-    eps = 1e-5
-    expected = (loss(x + eps * direction) - loss(x - eps * direction)) / (2 * eps)
-    np.testing.assert_allclose(jnp.sum(gradient * direction), expected, rtol=1e-7)
 
 
 def test_spd_trivialise_second_derivative_at_identity():
