@@ -114,11 +114,6 @@ def _cayley(a: Array) -> Array:
 class SOChart(LocalChart["SO"]):
     """SO(n) chart using Cayley at order 2 and Taylor+QR at higher orders."""
 
-    order: int
-
-    def __init__(self, order: int):
-        object.__setattr__(self, "order", int(order))
-
     def apply(self, x: Array, a: Array, geometry: SO) -> Array:
         omega = geometry._coords_to_alg(a)
         if self.order <= 2:
@@ -149,11 +144,6 @@ class SOChart(LocalChart["SO"]):
 
 
 class SPDChart(LocalChart["SPD"]):
-    order: int
-
-    def __init__(self, order: int):
-        object.__setattr__(self, "order", int(order))
-
     def apply(self, x: Array, a: Array, geometry: SPD) -> Array:
         x = _sym(jnp.asarray(x))
         lift = geometry._coords_to_sym(a)

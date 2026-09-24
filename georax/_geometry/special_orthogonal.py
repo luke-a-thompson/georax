@@ -6,7 +6,7 @@ import numpy as np
 from jaxtyping import Array
 
 from ._charts import SOChart
-from .base import FrameCoords, Manifold, StateArray
+from .base import FrameCoords, LocalChart, Manifold, StateArray
 
 __all__ = ["SO"]
 
@@ -16,18 +16,13 @@ class SO(Manifold["SO"]):
 
     _chart_class = SOChart
     n: int = eqx.field(static=True)
-    _upper_i: Array
-    _upper_j: Array
 
-    def __init__(self, n: int):
+    def __init__(self, n: int) -> None:
         n = int(n)
         if n < 2:
             raise ValueError("SO(n) requires n >= 2.")
 
-        upper_i, upper_j = np.triu_indices(n, k=1)
         object.__setattr__(self, "n", n)
-        object.__setattr__(self, "_upper_i", jnp.asarray(upper_i))
-        object.__setattr__(self, "_upper_j", jnp.asarray(upper_j))
 
     @property
     def state_shape(self) -> tuple[int, int]:
@@ -35,14 +30,15 @@ class SO(Manifold["SO"]):
 
     @property
     def coordinate_shape(self) -> tuple[int]:
-        return (int(self._upper_i.size),)
+        return (self.n * (self.n - 1) // 2,)
 
     def _coords_to_alg(self, a: FrameCoords) -> Array:
         self.check_coordinate_shape(a)
         coeffs = jnp.asarray(a)
         omega = jnp.zeros((self.n, self.n), dtype=coeffs.dtype)
-        omega = omega.at[self._upper_i, self._upper_j].set(coeffs)
-        omega = omega.at[self._upper_j, self._upper_i].set(-coeffs)
+        upper_i, upper_j = np.triu_indices(self.n, k=1)
+        omega = omega.at[upper_i, upper_j].set(coeffs)
+        omega = omega.at[upper_j, upper_i].set(-coeffs)
         return omega
 
     def _alg_to_coords(self, omega: Array) -> FrameCoords:
@@ -51,7 +47,7 @@ class SO(Manifold["SO"]):
                 f"{type(self).__name__} Lie algebra matrix must have shape {self.state_shape}; got {omega.shape}."
             )
         omega = 0.5 * (omega - omega.T)
-        return omega[self._upper_i, self._upper_j]
+        return omega[np.triu_indices(self.n, k=1)]
 
     def trivialise(self, x: StateArray, v: StateArray) -> FrameCoords:
         self.check_state_shape(x)
@@ -70,7 +66,7 @@ class SO(Manifold["SO"]):
         lift_b = self._coords_to_alg(b)
         return self._alg_to_coords(lift_a @ lift_b - lift_b @ lift_a)
 
-    def select_pullback_chart(self, required_order):
+    def select_pullback_chart(self, required_order: int) -> LocalChart[SO]:
         """Use Cayley as an exact coordinate map for pulled-back equations."""
         del required_order
         return self.select_chart(2)

@@ -2,13 +2,10 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-import numpy as np
 from diffrax import AbstractTerm
 from diffrax_lowstorage import EES25, LowStorageRecurrence
 
 from georax._solver.commutator_free import _AbstractCFEES
-
-_cf_ees25_embedded_penultimate_exps = (np.array([5 / 48, 1 / 16, 0.0]),)
 
 
 class CFEES25(_AbstractCFEES):
@@ -16,6 +13,10 @@ class CFEES25(_AbstractCFEES):
 
     Supports ODEs and SDEs. For SDEs, this converges to the Stratonovich
     solution. O(1)-reversible and uses minimal memory and exponential count.
+
+    Includes a first-order embedded ODE companion using the normalised final
+    increment: one additional chart action and no extra generator evaluations.
+    Returns an ambient endpoint difference for Diffrax's adaptive controllers.
 
     ??? Reference
 
@@ -31,9 +32,6 @@ class CFEES25(_AbstractCFEES):
     """
 
     recurrence: ClassVar[LowStorageRecurrence] = EES25.recurrence
-    embedded_penultimate_exps: ClassVar[tuple[np.ndarray, ...] | None] = (
-        _cf_ees25_embedded_penultimate_exps
-    )
 
     def antisymmetric_order(self, terms: AbstractTerm) -> int:
         del terms

@@ -14,6 +14,10 @@ class CFEES27(_AbstractCFEES):
     Supports ODEs and SDEs. For SDEs, this converges to the Stratonovich
     solution. O(1)-reversible and uses minimal memory and exponential count.
 
+    Includes a first-order embedded ODE companion using the normalised final
+    increment: one additional chart action and no extra generator evaluations.
+    Returns an ambient endpoint difference for Diffrax's adaptive controllers.
+
     ??? Reference
 
         ```bibtex

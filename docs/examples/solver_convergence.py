@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Any
 
 import diffrax
 import jax
@@ -13,9 +12,10 @@ import matplotlib
 import matplotlib.markers as mkr
 import matplotlib.pyplot as plt
 import numpy as np
+from _problems import make_solver_accuracy_ambient_term, make_solver_accuracy_term
 from jaxtyping import Array
 
-from georax import CFEES25, CFEES27, CG2, CG4, SO, GeometricTerm
+from georax import CFEES25, CFEES27, CG2, CG4, GeometricTerm
 
 matplotlib.use("Agg")
 jax.config.update("jax_enable_x64", True)
@@ -25,43 +25,13 @@ T1 = 1.0
 MAX_STEPS = 100_000
 
 
-def omega_body(t: Any) -> Array:
-    t_array = jnp.asarray(t)
-    return jnp.array(
-        [
-            0.8 + 0.45 * jnp.sin(0.7 * t_array),
-            0.55 * jnp.cos(1.3 * t_array + 0.2),
-            0.35 + 0.6 * jnp.sin(0.9 * t_array - 0.4),
-        ]
-    )
-
-
-def vector_field(t: Any, y: Array, args: Any) -> Array:
-    del args
-    omega = omega_body(t)
-    skew = jnp.array(
-        [
-            [0.0, -omega[2], omega[1]],
-            [omega[2], 0.0, -omega[0]],
-            [-omega[1], omega[0], 0.0],
-        ]
-    )
-    return y @ skew
-
-
-def frame_coeffs(t: Any, y: Array, args: Any) -> Array:
-    del y, args
-    omega = omega_body(t)
-    return jnp.array([-omega[2], omega[1], -omega[0]], dtype=omega.dtype)
-
-
 def make_term() -> GeometricTerm:
-    return GeometricTerm(frame_coeffs, geometry=SO(3))
+    return make_solver_accuracy_term()
 
 
 def reference_solution(y0: Array) -> Array:
     solution = diffrax.diffeqsolve(
-        diffrax.ODETerm(vector_field),
+        make_solver_accuracy_ambient_term(),
         diffrax.Dopri8(),
         T0,
         T1,

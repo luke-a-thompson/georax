@@ -12,22 +12,24 @@ from diffrax import (
     AbstractSolver,
     AbstractStratonovichSolver,
     AbstractTerm,
-    LocalLinearInterpolation,
 )
 from diffrax_lowstorage import LowStorageRecurrence
 from jaxtyping import Array, PyTree
+from numpy.typing import NDArray
 
-from georax._compat import Args, BoolScalarLike, DenseInfo, RealScalarLike, VF, Y
-from georax._geometry import Manifold
-from georax._term import GeometricTerm, find_geometry, select_chart_for_solver
+from georax._compat import VF, Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
+from georax._geometry import LocalChart, Manifold
+from georax._term import find_geometry, select_chart_for_solver
+
+from ._interpolation import GeometricInterpolation, geometric_dense_info
 
 
 @dataclass(frozen=True)
 class CommutatorFreeTableau:
     c: tuple[float, ...]
-    stage_exps: tuple[tuple[np.ndarray, ...], ...]
-    final_exps: tuple[np.ndarray, ...]
-    embedded_final_exps: tuple[np.ndarray, ...] | None = None
+    stage_exps: tuple[tuple[NDArray[np.float64], ...], ...]
+    final_exps: tuple[NDArray[np.float64], ...]
+    embedded_final_exps: tuple[NDArray[np.float64], ...] | None = None
 
     def __post_init__(self) -> None:
         num_stages = len(self.c)
@@ -68,8 +70,8 @@ class CommutatorFreeTableau:
 
 class AbstractCommutatorFreeSolver(AbstractSolver):
     term_structure: ClassVar[type[AbstractTerm]] = AbstractTerm
-    interpolation_cls: ClassVar[Callable[..., LocalLinearInterpolation]] = (
-        LocalLinearInterpolation
+    interpolation_cls: ClassVar[Callable[..., GeometricInterpolation]] = (
+        GeometricInterpolation
     )
     tableau: ClassVar[CommutatorFreeTableau]
 
@@ -82,8 +84,8 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
         y0: Y,
         args: Args,
     ) -> None:
-        del t0, t1, y0, args
-        select_chart_for_solver(self, terms, find_geometry(terms))
+        del t0, t1, args
+        find_geometry(terms).check_state_shape(y0)
         return None
 
     @override
@@ -99,17 +101,30 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
     def _apply_exp_product(
         self,
         y_base: Array,
-        exp_rows: tuple[np.ndarray, ...],
+        exp_rows: tuple[NDArray[np.float64], ...],
         stages: list[Array],
         geometry: Manifold[Any],
+        chart: LocalChart[Any],
     ) -> Array:
         y = y_base
-        for row in exp_rows:
-            coeffs = jnp.zeros_like(stages[0])
-            for weight, stage in zip(row, stages, strict=True):
-                coeffs = coeffs + jnp.asarray(weight, dtype=stage.dtype) * stage
-            y = geometry.apply_increment(y, coeffs)
+        for coeffs in self._increments(exp_rows, stages):
+            y = geometry.apply_increment(y, coeffs, chart)
         return y
+
+    @staticmethod
+    def _increments(
+        exp_rows: tuple[NDArray[np.float64], ...], stages: list[Array]
+    ) -> tuple[Array, ...]:
+        return tuple(
+            sum(
+                (
+                    jnp.asarray(weight, dtype=stage.dtype) * stage
+                    for weight, stage in zip(row, stages, strict=True)
+                ),
+                jnp.zeros_like(stages[0]),
+            )
+            for row in exp_rows
+        )
 
     @override
     def step(
@@ -127,18 +142,17 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
         dt = t1 - t0
         control = terms.contr(t0, t1)
         geometry = find_geometry(terms)
-        if geometry.chart is None:
-            raise TypeError(
-                f"{type(self).__name__} requires a geometry with a selected chart."
-            )
+        chart = select_chart_for_solver(self, terms, geometry)
         stages: list[Array] = []
 
         for c_i, exp_rows in zip(self.tableau.c, self.tableau.stage_exps, strict=True):
-            y_stage = self._apply_exp_product(y0, exp_rows, stages, geometry)
+            y_stage = self._apply_exp_product(y0, exp_rows, stages, geometry, chart)
             t_stage = t1 if c_i == 1.0 else t0 + c_i * dt
             stages.append(terms.prod(terms.vf(t_stage, y_stage, args), control))
 
-        y1 = self._apply_exp_product(y0, self.tableau.final_exps, stages, geometry)
+        y1 = self._apply_exp_product(
+            y0, self.tableau.final_exps, stages, geometry, chart
+        )
 
         y_error = None
         if self.tableau.embedded_final_exps is not None:
@@ -147,18 +161,22 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
                 self.tableau.embedded_final_exps,
                 stages,
                 geometry,
+                chart,
             )
             # This ambient subtraction is acceptable for now; a geometry-aware
             # difference may be preferable for manifold error control later.
             y_error = y1 - y_hat
 
-        dense_info = dict(y0=y0, y1=y1)
+        dense_info = geometric_dense_info(
+            y0, y1, self._increments(self.tableau.final_exps, stages), geometry, chart
+        )
         return y1, y_error, dense_info, None, RESULTS.successful
 
 
 class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
     recurrence: ClassVar[LowStorageRecurrence]
-    embedded_penultimate_exps: ClassVar[tuple[np.ndarray, ...] | None] = None
+    embedded_penultimate_exps: ClassVar[tuple[NDArray[np.float64], ...] | None] = None
+    embedded_final_increment: ClassVar[bool] = False
 
     @property
     def _tracks_penultimate(self) -> bool:
@@ -167,7 +185,10 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
             or self.embedded_penultimate_exps is not None
         )
 
-    def error_order(self, terms: GeometricTerm) -> int | None:
+    def error_order(self, terms: AbstractTerm) -> RealScalarLike | None:
+        if self.embedded_final_increment:
+            # A 2(1) pair for ODEs; use Diffrax's strong-order convention for SDEs.
+            return AbstractSolver.error_order(self, terms)
         return self.order(terms) if self._tracks_penultimate else None
 
     @override
@@ -190,10 +211,7 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
         dt = t1 - t0
         control = terms.contr(t0, t1)
         geometry = find_geometry(terms)
-        if geometry.chart is None:
-            raise TypeError(
-                f"{type(self).__name__} requires a geometry with a selected chart."
-            )
+        chart = select_chart_for_solver(self, terms, geometry)
         stages: list[Array] | None = (
             [] if self.embedded_penultimate_exps is not None else None
         )
@@ -203,7 +221,9 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
         tmp = terms.prod(terms.vf(t_stage0, y0, args), control)
         if stages is not None:
             stages.append(tmp)
-        y1 = geometry.apply_increment(y0, jnp.asarray(b[0], dtype=tmp.dtype) * tmp)
+        increment = jnp.asarray(b[0], dtype=tmp.dtype) * tmp
+        increments = [increment]
+        y1 = geometry.apply_increment(y0, increment, chart)
 
         y_penultimate = None
         for stage_index in range(1, self.recurrence.num_stages):
@@ -218,14 +238,29 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
             tmp = jnp.asarray(a[stage_index - 1], dtype=tmp.dtype) * tmp + coeffs
             if self._tracks_penultimate and stage_index == last_stage:
                 y_penultimate = y1
-            y1 = geometry.apply_increment(
-                y1, jnp.asarray(b[stage_index], dtype=tmp.dtype) * tmp
-            )
+            increment = jnp.asarray(b[stage_index], dtype=tmp.dtype) * tmp
+            increments.append(increment)
+            y1 = geometry.apply_increment(y1, increment, chart)
 
         # Ambient subtraction is acceptable for now; a geometry-aware
         # difference may be preferable for manifold error control later.
         y_error = None
-        if self.embedded_penultimate_exps is not None:
+        if self.embedded_final_increment:
+            # A omits the first (zero) coefficient, so d_1 = 1.
+            # Compute this scalar from the static coefficients, without retaining
+            # generator evaluations or another algebra accumulator.
+            normalization = 1.0
+            for a_i in self.recurrence.A:
+                normalization = 1.0 + float(a_i) * normalization
+            if normalization == 0.0:
+                raise ValueError(
+                    "An embedded final increment requires nonzero normalization."
+                )
+            y_hat = geometry.apply_increment(
+                y0, tmp / jnp.asarray(normalization, dtype=tmp.dtype), chart
+            )
+            y_error = y1 - y_hat
+        elif self.embedded_penultimate_exps is not None:
             assert y_penultimate is not None, (
                 "Embedded penultimate exponentials require at least two stages."
             )
@@ -235,12 +270,13 @@ class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
                 self.embedded_penultimate_exps,
                 stages,
                 geometry,
+                chart,
             )
             y_error = y1 - y_hat
         elif y_penultimate is not None:
             y_error = y1 - y_penultimate
 
-        dense_info = dict(y0=y0, y1=y1)
+        dense_info = geometric_dense_info(y0, y1, increments, geometry, chart)
         return y1, y_error, dense_info, None, RESULTS.successful
 
 
@@ -249,7 +285,9 @@ class _AbstractCFEES(
     AbstractReversibleSolver,
     AbstractStratonovichSolver,
 ):
-    """Shared reversible Diffrax plumbing for the commutator-free EES family."""
+    """Shared reversible solver state and orders for the CF-EES family."""
+
+    embedded_final_increment: ClassVar[bool] = True
 
     @override
     def init(

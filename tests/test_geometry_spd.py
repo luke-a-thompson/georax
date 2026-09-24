@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as np
+import pytest
 
-from georax import CG2, SPD, GeometricTerm
-from georax._geometry.base import post_lie_bracket
+from georax import CG2, SPD, GeometricTerm, post_lie_bracket
+
+jax.config.update("jax_enable_x64", True)
 
 
 def _is_spd(x: jnp.ndarray) -> bool:
@@ -15,25 +18,25 @@ def _is_spd(x: jnp.ndarray) -> bool:
 
 def test_spd_increment_stays_in_spd() -> None:
     spd = SPD(2)
-    spd.select_chart(12)
+    chart = spd.select_chart(12)
     x = jnp.array([[2.0, 0.3], [0.3, 1.4]])
     a = jnp.array([0.2, -0.1, 0.35])
 
-    y = spd.apply_increment(x, a)
+    y = spd.apply_increment(x, a, chart)
 
     assert _is_spd(y)
 
 
 def test_spd_increment_matches_first_order_tangent_step() -> None:
     spd = SPD(2)
-    spd.select_chart(12)
+    chart = spd.select_chart(12)
     x = jnp.array([[1.8, 0.2], [0.2, 1.3]])
     a = jnp.array([0.4, -0.15, 0.25])
     lift = spd._coords_to_sym(a)
     v = lift @ x + x @ lift
     eps = 1e-4
 
-    y = spd.apply_increment(x, eps * a)
+    y = spd.apply_increment(x, eps * a, chart)
 
     assert bool(jnp.allclose(y, x + eps * v, atol=1e-7, rtol=1e-4))
 
@@ -94,3 +97,24 @@ def test_spd_commutator_free_step_preserves_spd() -> None:
     )
 
     assert _is_spd(y1)
+
+
+@pytest.mark.parametrize("diagonal", [(1.0, 1.0, 1.0), (1.0, 1.0, 2.0)])
+def test_spd_trivialise_derivative_at_repeated_eigenvalues(diagonal):
+    geometry = SPD(3)
+    x = jnp.diag(jnp.array(diagonal))
+    v = jnp.array([[0.3, 0.2, -0.1], [0.2, 0.1, 0.4], [-0.1, 0.4, 0.5]])
+    dx = jnp.array([[0.1, -0.2, 0.0], [-0.2, 0.3, 0.1], [0.0, 0.1, -0.1]])
+    dv = 0.2 * v
+    a, da = jax.jvp(geometry.trivialise, (x, v), (dx, dv))
+    lift = geometry._coords_to_sym(a)
+    np.testing.assert_allclose(
+        geometry.detrivialise(x, da) + dx @ lift + lift @ dx, dv, atol=1e-12
+    )
+
+
+def test_spd_trivialise_second_derivative_at_identity():
+    geometry = SPD(2)
+    v = jnp.array([[0.3, 0.1], [0.1, 0.2]])
+    loss = lambda scale: geometry.trivialise(scale * jnp.eye(2), v).sum()
+    np.testing.assert_allclose(jax.hessian(loss)(1.0), 2 * loss(1.0), atol=1e-12)

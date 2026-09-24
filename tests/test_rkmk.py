@@ -3,11 +3,11 @@ from __future__ import annotations
 import diffrax
 import jax
 import jax.numpy as jnp
-from conftest import make_solver_accuracy_ambient_term, make_solver_accuracy_term
+from _problems import make_solver_accuracy_ambient_term, make_solver_accuracy_term
 from diffrax import Heun
 
 from georax import RKMK, Euclidean, GeometricTerm
-from georax._term import PulledDriftTerm
+from georax._term import PulledDriftTerm, Pullback, select_chart_for_solver
 
 jax.config.update("jax_enable_x64", True)
 
@@ -129,9 +129,10 @@ def test_rkmk_error_is_difference_between_reconstructed_states() -> None:
     y1, y_error, _, _, _ = solver.step(_TERM, 0.0, 0.2, _Y0, None, None, False)
 
     geometry = _TERM.geometry
+    chart = select_chart_for_solver(solver, _TERM, geometry, pullback=True)
     omega0 = geometry.zero_coordinates(_Y0)
     omega1, omega_error, _, _, _ = solver.solver.step(
-        PulledDriftTerm(_TERM, _Y0),
+        PulledDriftTerm(_TERM, Pullback(geometry, chart, _Y0)),
         0.0,
         0.2,
         omega0,
@@ -140,7 +141,7 @@ def test_rkmk_error_is_difference_between_reconstructed_states() -> None:
         False,
     )
     assert omega_error is not None
-    expected = geometry.apply_increment(_Y0, omega1 + omega_error) - y1
+    expected = geometry.apply_increment(_Y0, omega1 + omega_error, chart) - y1
 
     assert y_error is not None
     assert bool(jnp.allclose(y_error, expected))

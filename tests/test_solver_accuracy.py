@@ -4,7 +4,7 @@ import diffrax
 import jax
 import jax.numpy as jnp
 import pytest
-from conftest import (
+from _problems import (
     SOLVERS,
     make_solver_accuracy_ambient_term,
     make_solver_accuracy_term,

@@ -3,9 +3,10 @@ from __future__ import annotations
 import diffrax
 import jax
 import jax.numpy as jnp
-from conftest import make_solver_accuracy_ambient_term, make_solver_accuracy_term
+from _problems import make_solver_accuracy_ambient_term, make_solver_accuracy_term
 
 from georax import CG4, RKMK, SO
+from georax._term import select_chart_for_solver
 
 jax.config.update("jax_enable_x64", True)
 
@@ -36,8 +37,7 @@ def test_rkmk_tsit5_converges_with_cayley_pullback() -> None:
     assert expected_order == 5
 
     solver.init(term, _T0, _T1, _Y0, None)
-    assert term.geometry.chart is not None
-    assert term.geometry.chart.order == 2
+    assert select_chart_for_solver(solver, term, term.geometry, pullback=True).order == 2
 
     reference = diffrax.diffeqsolve(
         make_solver_accuracy_ambient_term(),
@@ -84,5 +84,4 @@ def test_commutator_free_solver_still_selects_order_matched_chart() -> None:
     term = make_solver_accuracy_term()
     CG4().init(term, _T0, _T1, _Y0, None)
 
-    assert term.geometry.chart is not None
-    assert term.geometry.chart.order == 4
+    assert select_chart_for_solver(CG4(), term, term.geometry).order == 4

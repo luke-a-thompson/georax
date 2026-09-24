@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
+import equinox as eqx
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -35,13 +36,10 @@ class AffineRetractionOps(Manifold["AffineRetractionOps"]):
 
     def __init__(self, scale: float = 1.0):
         object.__setattr__(self, "scale", scale)
-        object.__setattr__(self, "chart", _AffineRetractionChart())
 
     def select_chart(self, required_order) -> LocalChart[AffineRetractionOps]:
         del required_order
-        chart: LocalChart[AffineRetractionOps] = _AffineRetractionChart()
-        object.__setattr__(self, "chart", chart)
-        return chart
+        return _AffineRetractionChart()
 
     @property
     def state_shape(self) -> tuple[int, ...]:
@@ -65,7 +63,7 @@ class AffineRetractionOps(Manifold["AffineRetractionOps"]):
 
 
 class _AffineRetractionChart(LocalChart[AffineRetractionOps]):
-    order: int = 12
+    order: int = eqx.field(static=True, default=12)
 
     def apply(self, x: Array, a: Array, geometry: AffineRetractionOps) -> Array:
         return geometry.scale * x + a

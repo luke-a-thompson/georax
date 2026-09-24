@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import ClassVar, override
 
-from diffrax import RESULTS, AbstractItoSolver, AbstractTerm, LocalLinearInterpolation
-from georax._compat import Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
+from diffrax import RESULTS, AbstractItoSolver, AbstractTerm
+
+from georax._compat import VF, Args, BoolScalarLike, DenseInfo, RealScalarLike, Y
 from georax._term import find_geometry
+
+from ._interpolation import GeometricInterpolation, geometric_dense_info
 
 
 class GeometricEuler(AbstractItoSolver):
@@ -26,13 +30,15 @@ class GeometricEuler(AbstractItoSolver):
         ```
     """
 
-    term_structure: ClassVar = AbstractTerm
-    interpolation_cls: ClassVar = LocalLinearInterpolation
+    term_structure: ClassVar[type[AbstractTerm]] = AbstractTerm
+    interpolation_cls: ClassVar[Callable[..., GeometricInterpolation]] = (
+        GeometricInterpolation
+    )
 
-    def order(self, terms) -> int:
+    def order(self, terms: AbstractTerm) -> int:
         return 1
 
-    def strong_order(self, terms) -> float:
+    def strong_order(self, terms: AbstractTerm) -> float:
         return 0.5
 
     @override
@@ -44,9 +50,8 @@ class GeometricEuler(AbstractItoSolver):
         y0: Y,
         args: Args,
     ) -> None:
-        del t0, t1, y0, args
-        geometry = find_geometry(terms)
-        geometry.select_chart(2)
+        del t0, t1, args
+        find_geometry(terms).check_state_shape(y0)
         return None
 
     @override
@@ -56,7 +61,7 @@ class GeometricEuler(AbstractItoSolver):
         t0: RealScalarLike,
         y0: Y,
         args: Args,
-    ):
+    ) -> VF:
         return terms.vf(t0, y0, args)
 
     @override
@@ -73,13 +78,12 @@ class GeometricEuler(AbstractItoSolver):
         del solver_state, made_jump
 
         geometry = find_geometry(terms)
-        if geometry.chart is None:
-            raise TypeError("GeometricEuler requires a geometry with a selected chart.")
+        chart = geometry.select_chart(2)
 
         vf = terms.vf(t0, y0, args)
         control = terms.contr(t0, t1)
         increment = terms.prod(vf, control)
-        y1 = geometry.apply_increment(y0, increment)
+        y1 = geometry.apply_increment(y0, increment, chart)
 
-        dense_info = dict(y0=y0, y1=y1)
+        dense_info = geometric_dense_info(y0, y1, (increment,), geometry, chart)
         return y1, None, dense_info, None, RESULTS.successful

@@ -20,7 +20,7 @@ Georax provides geometric numerical integrators for the [Diffrax](https://github
 | `CG2` | ODE/SDE | 2 | No | 2-stage Crouch-Grossman commutator-free method |
 | `CG4` | ODE/SDE | 4 | No | 5-stage Crouch-Grossman commutator-free method |
 | `CFEES25` | ODE/SDE | 2 | Yes | `CF-EES(2,5;1/10)`, O(1)-reversible, Stratonovich, 2N low-storage recurrence |
-| `CFEES27` | ODE/SDE | 2 | No | `CF-EES(2,7;(5 - 3*sqrt(2))/14)`, O(1)-reversible, Stratonovich, 2N low-storage recurrence |
+| `CFEES27` | ODE/SDE | 2 | Yes | `CF-EES(2,7;(5 - 3*sqrt(2))/14)`, O(1)-reversible, Stratonovich, 2N low-storage recurrence |
 
 ## Geometries
 
@@ -31,6 +31,8 @@ Georax provides geometric numerical integrators for the [Diffrax](https://github
 | `SPD(n)` | `(n, n)` symmetric positive-definite matrix | `n * (n + 1) // 2` symmetric coordinates | Congruence action via truncated exponential |
 
 `GeometricTerm` is intrinsic: its vector field returns frame or Lie-algebra coordinates, not an ambient tangent matrix.
+
+Direct geometry calls take an explicit chart: `geometry.apply_increment(x, a, geometry.select_chart(order))`. Chart selection does not modify the geometry.
 
 ## Usage
 
@@ -63,10 +65,28 @@ For stochastic problems, use `GeometricEuler()` directly or wrap a Diffrax stoch
 
 `CFEES25` and `CFEES27` also work directly with SDE `MultiTerm`s. They are Stratonovich solvers, so the supplied drift and diffusion should describe the Stratonovich SDE in frame coordinates.
 
+### Adaptive CF-EES steps
+
+Both CF-EES solvers provide an embedded 2(1) pair for ODEs. Enable adaptive stepping by passing a controller to `diffeqsolve`:
+
+```python
+sol = diffrax.diffeqsolve(
+    term,
+    CFEES25(),  # CFEES27() also supports the embedded pair.
+    t0=0.0,
+    t1=1.0,
+    dt0=0.01,
+    y0=jnp.eye(3),
+    stepsize_controller=diffrax.PIDController(rtol=1e-5, atol=1e-7),
+)
+```
+
 ## Install
 
+From a checkout, including the required pinned Diffrax fork:
+
 ```bash
-pip install georax
+pip install .
 ```
 
 For development:
@@ -78,6 +98,8 @@ uv sync --extra dev
 ## Limitations
 
 `RKMK` requires the selected chart to implement the inverse differential needed by the wrapped solver. On `SO(n)`, it uses the Cayley transform as an exact local coordinate map, together with its closed-form inverse differential, at every wrapped solver order. This is distinct from using Cayley as an order-2 approximation to the exponential in a retraction method; see [Iserles and Zanna's Cayley-transform RKMK construction](https://doi.org/10.1112/S1461157000000206). Other geometries and charts use a generic dense-Jacobian fallback, which is accurate but can be expensive in high dimensions.
+
+Intermediate saved samples and dense output preserve the manifold through chart interpolation, but do not inherit the solver's high-order accuracy between steps.
 
 `CFEES25` and `CFEES27` are the commutator-free EES schemes from Shmelev, Thompson, and Salvi. They support both ODEs and SDEs, are O(1)-reversible, and converge to the Stratonovich solution for SDEs. The `CFEES25` coefficients correspond to `EES(2,5;1/10)`.
 
