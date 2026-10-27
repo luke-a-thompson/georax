@@ -17,6 +17,7 @@ from georax import (
     SRKMK,
     Euclidean,
     GeometricEuler,
+    GeometricEulerHeun,
     GeometricTerm,
 )
 
@@ -67,6 +68,7 @@ def test_additive_check_checks_the_pulled_back_diffusion():
 
 SOLVERS = [
     GeometricEuler(),
+    GeometricEulerHeun(),
     CG2(),
     CG4(),
     CFEES25(),
@@ -81,7 +83,7 @@ SOLVERS = [
 def test_saved_and_dense_so_states_stay_on_manifold(solver, backward):
     geometry = SO(3)
     term = GeometricTerm(lambda t, y, args: jnp.array([0.7 + t, 0.3, -0.2]), geometry)
-    if isinstance(solver, SRKMK):
+    if isinstance(solver, (SRKMK, GeometricEulerHeun)):
         term = diffrax.MultiTerm(
             term,
             diffrax.ControlTerm(lambda t, y, args: 0.1 * jnp.eye(3), brownian((3,))),

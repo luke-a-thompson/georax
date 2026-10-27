@@ -12,10 +12,15 @@ from ._interpolation import GeometricInterpolation, geometric_dense_info
 
 
 class GeometricEuler(AbstractItoSolver):
-    """Geometric Euler method.
+    """Euler--Maruyama in the geometry's local chart coordinates.
 
-    For SDE terms this is Euler--Maruyama: the full Diffrax term increment is
-    evaluated at the left endpoint, then applied via the manifold chart.
+    The full Diffrax term increment is evaluated at the left endpoint, then
+    applied via an order-2 chart. The Itô interpretation refers to these local
+    coordinates, not to the ambient state array. For a chart ``R_y(a)``, drift
+    coefficients ``f`` and independent Brownian diffusion columns ``g_j``, the
+    ambient Itô drift is ``D R_y(0) f + 0.5 sum_j D² R_y(0)[g_j, g_j]``.
+    Thus simply detrivialising ``f`` does not give the ambient Itô drift on a
+    nonlinear geometry. On Euclidean geometry this is ordinary Euler--Maruyama.
 
     ??? Reference
 

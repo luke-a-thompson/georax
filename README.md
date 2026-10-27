@@ -14,7 +14,8 @@ Georax provides geometric numerical integrators for the [Diffrax](https://github
 
 | Class | Problem type | Order | Automatic stepsizing | Notes |
 |-------|--------------|-------|----------------------|-------|
-| `GeometricEuler` | ODE/SDE | 1 ODE, 0.5 strong SDE | No | Euler and Euler-Maruyama update through a manifold chart |
+| `GeometricEuler` | ODE/SDE | 1 ODE, 0.5 strong SDE | No | Euler–Maruyama in local chart coordinates |
+| `GeometricEulerHeun` | SDE | 1 ODE, 0.5 strong SDE | No | Stratonovich; Euler drift and Heun diffusion |
 | `RKMK(base_solver)` | ODE | base solver order | base solver dependent | Runge-Kutta-Munthe-Kaas lift of an explicit Diffrax RK solver |
 | `SRKMK(base_solver)` | SDE | base solver dependent | base solver dependent | Stochastic Runge-Kutta-Munthe-Kaas lift of a Diffrax SRK solver |
 | `CG2` | ODE/SDE | 2 | No | 2-stage Crouch-Grossman commutator-free method |
@@ -93,7 +94,7 @@ for solver in solvers:
     )
 ```
 
-For stochastic problems, use `GeometricEuler()` directly or wrap a Diffrax stochastic Runge-Kutta method with `SRKMK(...)`. Diffusion terms should return frame-coordinate coefficients compatible with the geometry.
+For SDEs, use `GeometricEuler()` for Itô in local chart coordinates, `GeometricEulerHeun()` for Stratonovich, or `SRKMK(...)` to wrap a Diffrax stochastic Runge-Kutta method. Supply frame-coordinate coefficients; nonlinear charts contribute an additional ambient Itô drift. `GeometricEulerHeun()` expects `MultiTerm(GeometricTerm(drift, geometry), diffusion_term)`.
 
 `CFEES25` and `CFEES27` also work directly with SDE `MultiTerm`s. They are Stratonovich solvers, so the supplied drift and diffusion should describe the Stratonovich SDE in frame coordinates.
 

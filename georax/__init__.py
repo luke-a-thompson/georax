@@ -8,6 +8,7 @@ from georax._solver import (
     AbstractCommutatorFreeSolver,
     AbstractLowStorageCommutatorFreeSolver,
     GeometricEuler,
+    GeometricEulerHeun,
 )
 
 from ._geometry import (
@@ -37,6 +38,7 @@ __all__ = [
     "AbstractLowStorageCommutatorFreeSolver",
     "Euclidean",
     "GeometricEuler",
+    "GeometricEulerHeun",
     "GeometricTerm",
     "LocalChart",
     "Manifold",
