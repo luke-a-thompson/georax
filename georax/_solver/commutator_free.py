@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, ClassVar, override
@@ -174,7 +175,12 @@ class AbstractCommutatorFreeSolver(AbstractSolver):
 
 
 class AbstractLowStorageCommutatorFreeSolver(AbstractCommutatorFreeSolver):
-    recurrence: ClassVar[LowStorageRecurrence]
+    @property
+    @abstractmethod
+    def recurrence(self) -> LowStorageRecurrence:
+        """The method's coefficients, provided as a class attribute or property."""
+        raise NotImplementedError
+
     embedded_penultimate_exps: ClassVar[tuple[NDArray[np.float64], ...] | None] = None
     embedded_final_increment: ClassVar[bool] = False
 

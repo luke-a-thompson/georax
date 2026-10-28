@@ -22,6 +22,7 @@ Georax provides geometric numerical integrators for the [Diffrax](https://github
 | `CG4` | ODE/SDE | 4 | No | 5-stage Crouch-Grossman commutator-free method |
 | `CFEES25` | ODE/SDE | 2 | Yes | `CF-EES(2,5;1/10)`, O(1)-reversible, Stratonovich, 2N low-storage recurrence |
 | `CFEES27` | ODE/SDE | 2 | Yes | `CF-EES(2,7;(5 - 3*sqrt(2))/14)`, O(1)-reversible, Stratonovich, 2N low-storage recurrence |
+| `CFCosineEES(p)` | ODE/SDE | 2 | No | Cosine EES with odd reversible order `p >= 3`, `(p + 1) // 2` stages, Stratonovich, 2N low-storage recurrence |
 
 ## Geometries
 
@@ -96,11 +97,13 @@ for solver in solvers:
 
 For SDEs, use `GeometricEuler()` for Itô in local chart coordinates, `GeometricEulerHeun()` for Stratonovich, or `SRKMK(...)` to wrap a Diffrax stochastic Runge-Kutta method. Supply frame-coordinate coefficients; nonlinear charts contribute an additional ambient Itô drift. `GeometricEulerHeun()` expects `MultiTerm(GeometricTerm(drift, geometry), diffusion_term)`.
 
-`CFEES25` and `CFEES27` also work directly with SDE `MultiTerm`s. They are Stratonovich solvers, so the supplied drift and diffusion should describe the Stratonovich SDE in frame coordinates.
+`CFEES25`, `CFEES27`, and `CFCosineEES` also work directly with SDE `MultiTerm`s. They are Stratonovich solvers, so the supplied drift and diffusion should describe the Stratonovich SDE in frame coordinates.
+
+For the cosine EES family, use `CFCosineEES(reversible_order=11)` with any odd integer at least 3. The reversible order controls round-trip accuracy; forward accuracy remains second order. All members use a 2N low-storage recurrence and support `diffrax.ReversibleAdjoint()`. For example, `CFCosineEES(9)` uses five stages and `CFCosineEES(11)` uses six. This family has no embedded error estimate, so use fixed step sizes.
 
 ### Adaptive CF-EES steps
 
-Both CF-EES solvers provide an embedded 2(1) pair for ODEs. Enable adaptive stepping by passing a controller to `diffeqsolve`:
+`CFEES25` and `CFEES27` provide an embedded 2(1) pair for ODEs. Enable adaptive stepping by passing a controller to `diffeqsolve`:
 
 ```python
 sol = diffrax.diffeqsolve(
@@ -155,6 +158,24 @@ Core numerical references:
 - Crouch and Grossman (1993), "Numerical integration of ordinary differential equations on manifolds", doi: `10.1007/BF02429858`.
 - Munthe-Kaas (1998), "Runge-Kutta methods on Lie groups", doi: `10.1007/BF02510919`.
 - Bazavov (2022), "Commutator-free Lie group methods with minimum storage requirements and reuse of exponentials", doi: `10.1007/s10543-021-00892-x`.
+
+## Convergence examples
+
+The deterministic and stochastic examples in `docs/examples` use 80-digit `decimal.Decimal` arithmetic by default, with crimson error markers, blue reference slopes, and PNG/PDF/JSON exports. Both plot CF-EES orders (2,5), (2,7), and (2,9), with the last corresponding to `CFCosineEES(9)`. Stochastic runs produce one figure for each Hurst parameter, with a single column ordered as 25, 25 recovery, 27, 27 recovery, 29, 29 recovery. Results go to `docs/examples/outputs`; `--precision`, `--min-power`, `--max-power`, and `--output-dir` configure either experiment.
+
+```bash
+python docs/examples/solver_convergence.py
+python docs/examples/solver_convergence.py --include-cg
+python docs/examples/stochastic_convergence.py
+# Smaller stochastic run:
+python docs/examples/stochastic_convergence.py --num-paths 4 --path-power 10 --max-power 8
+```
+
+These scripts evaluate the solver formulas and Georax's SO(3) charts independently in Decimal. Deterministic forward errors use an independent Decimal power-series reference. CF-EES backward errors are round-trip defects from the computed forward endpoint. With `--include-cg`, CG2 and CG4 instead integrate backward from the reference endpoint, matching the original experiment; these plots use a separate `_with_cg` filename.
+
+CG4 coefficients are recomputed at the requested precision by solving all 13 fourth-order conditions, starting from the [published five-stage table](https://ancs.eng.buffalo.edu/pdf/ancs_papers/2012/geom_int.pdf). Its two free parameters, `a21 = 0.8177227988124852` and `a31 = 0.3199876375476427`, are fixed exactly; the remaining coefficients define a nearby high-precision tableau. The reproducible refinement is in `docs/examples/_decimal_cg4.py` and follows the [Crouch–Grossman order theory](https://doi.org/10.1023/A:1022325426017).
+
+Stochastic runs use nested samples of the same two-channel Brownian or fractional Brownian path, with `--hurst 0.4 0.5 0.6` and `--seed 0` by default. Gaussian/FFT sampling uses binary64; samples are converted exactly to Decimal before integration, and Brownian scaling and accumulation also use Decimal. Forward errors compare against a finite finer-grid solution, and each curve averages log-errors across paths, as in the original example. JSON files include individual path errors, coefficients, precision, reference details, and measured slopes. Points below the Decimal roundoff threshold are shown in grey and excluded from fitting. The full default stochastic ensemble uses 12 paths with 8192 steps each and takes longer than the smaller run above.
 
 ## Benchmarking
 

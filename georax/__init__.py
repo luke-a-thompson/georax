@@ -7,6 +7,7 @@ from georax._solver import (
     SRKMK,
     AbstractCommutatorFreeSolver,
     AbstractLowStorageCommutatorFreeSolver,
+    CFCosineEES,
     GeometricEuler,
     GeometricEulerHeun,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "SRKMK",
     "AbstractCommutatorFreeSolver",
     "AbstractLowStorageCommutatorFreeSolver",
+    "CFCosineEES",
     "Euclidean",
     "GeometricEuler",
     "GeometricEulerHeun",

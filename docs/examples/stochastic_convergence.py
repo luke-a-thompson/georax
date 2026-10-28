@@ -1,304 +1,244 @@
-"""Pathwise stochastic convergence experiment for the georax CF solvers."""
+"""Decimal pathwise SO(3) convergence experiments for the CF-EES solvers.
 
-# ruff: noqa: E402
+Run: python docs/examples/stochastic_convergence.py --precision 80
+
+Gaussian/FFT path samples are generated in binary64 and converted exactly to
+Decimal before integration. Stages, charts, errors and log averaging use Decimal.
+Forward errors compare nested coarse paths with a finite fine-grid reference;
+round trips traverse each coarse path in reverse from its computed endpoint.
+The full default ensemble is substantially slower than the JAX experiment.
+Each Hurst value has a single-column figure, with forward then round-trip
+errors for each method in order.
+"""
 
 from __future__ import annotations
 
 import argparse
-import os
-from collections.abc import Callable
-from functools import lru_cache
+from decimal import Decimal, localcontext
 from pathlib import Path
-from typing import Any
 
-os.environ.setdefault("JAX_PLATFORMS", "cpu")
-
-import diffrax
-import jax
-
-jax.config.update("jax_platform_name", "cpu")
-jax.config.update("jax_enable_x64", True)
-import jax.numpy as jnp
-import matplotlib
-import matplotlib.markers as mkr
-import matplotlib.pyplot as plt
 import numpy as np
+from _convergence_plot import (
+    add_common_arguments,
+    plot_curve,
+    plt,
+    save_figure,
+    set_method_title,
+    validate_common_arguments,
+)
+from _decimal_so3 import (
+    Array,
+    DecimalMethod,
+    identity,
+    make_methods,
+    norm,
+    stochastic_coeffs,
+)
 from fbm import FBM
-from jaxtyping import Array
-
-from georax import CFEES25, CFEES27, SO, GeometricTerm
-
-matplotlib.use("Agg")
-
-T0 = 0.0
-T1 = 1.0
-SIGMA = 1.0
-SO3_X0 = jnp.eye(3, dtype=jnp.float64)
-SO3_GEOMETRY = SO(3)
-
-XLABEL = r"$\log_{10}(h)$"
-YLABEL_FORWARD = r"$\log_{10}(\mathcal{E}(h))$"
-YLABEL_BACKWARD = r"$\log_{10}(\overleftarrow{\mathcal{E}}(h))$"
-
-
-def so3_coeffs_matrix(t: Any, x: Array, args: Any) -> Array:
-    del t, args
-    old_coeffs = SIGMA * jnp.array(
-        [
-            [0.9 + 0.2 * x[0, 0], 0.15 + 0.25 * x[0, 1]],
-            [0.25 + 0.2 * x[1, 2], -0.35 + 0.2 * x[1, 1]],
-            [0.1 + 0.3 * x[2, 0], 0.8 + 0.15 * x[2, 2]],
-        ],
-        dtype=x.dtype,
-    )
-    # Map legacy local coordinates [B1, B2, B3] to georax SO(3) basis:
-    # [B1, B2, B3] = [-K12, K02, -K01].
-    coeffs = jnp.stack(
-        (-old_coeffs[2, :], old_coeffs[1, :], -old_coeffs[0, :]),
-        axis=0,
-    )
-    return coeffs
-
-
-def get_2d_bm(num_steps: int, length: float, key: jax.Array) -> np.ndarray:
-    dt = length / num_steps
-    dw = np.asarray(
-        jax.random.normal(key, (num_steps, 2), dtype=jnp.float64) * np.sqrt(dt)
-    )
-    x = np.zeros((num_steps + 1, 2), dtype=np.float64)
-    x[1:] = np.cumsum(dw, axis=0)
-    return x
-
-
-def get_2d_fbm(num_steps: int, hurst: float, length: float) -> np.ndarray:
-    fbm = FBM(n=num_steps, hurst=hurst, length=length, method="daviesharte")
-    return np.stack([fbm.fbm(), fbm.fbm()], axis=-1)
-
-
-def make_matrix_method_runner(
-    solver,
-    *,
-    geometry,
-    coeffs_matrix_fn: Callable[[Any, Array, Any], Array],
-    y0_default: np.ndarray,
-) -> Callable[..., np.ndarray]:
-    stepsize_controller = diffrax.ConstantStepSize()
-    frame_shape = coeffs_matrix_fn(
-        T0, jnp.asarray(y0_default, dtype=jnp.float64), None
-    ).shape[:-1]
-
-    @lru_cache(maxsize=None)
-    def _compiled_runner(num_points: int):
-        if num_points < 2:
-            raise ValueError("Need at least two control points.")
-
-        ts = jnp.linspace(T0, T1, num_points, dtype=jnp.float64)
-        dt0 = float((T1 - T0) / (num_points - 1))
-        saveat = diffrax.SaveAt(ts=ts)
-
-        @jax.jit
-        def _run(x: jax.Array, y0: jax.Array) -> jax.Array:
-            control = diffrax.LinearInterpolation(ts=ts, ys=x)
-            term = diffrax.MultiTerm(
-                GeometricTerm(
-                    lambda t, y, args: jnp.zeros(frame_shape, dtype=y.dtype),
-                    geometry=geometry,
-                ),
-                diffrax.ControlTerm(
-                    lambda t, y, args: coeffs_matrix_fn(t, y, args),
-                    control,
-                ),
-            )
-            solution = diffrax.diffeqsolve(
-                term,
-                solver,
-                t0=T0,
-                t1=T1,
-                dt0=dt0,
-                y0=y0,
-                saveat=saveat,
-                stepsize_controller=stepsize_controller,
-                adjoint=diffrax.ReversibleAdjoint(),
-                max_steps=num_points + 4,
-                throw=True,
-            )
-            assert solution.ys is not None
-            return solution.ys
-
-        return _run
-
-    def _run(x: np.ndarray, y0: np.ndarray | None = None) -> np.ndarray:
-        x_arr = jnp.asarray(np.asarray(x, dtype=np.float64), dtype=jnp.float64)
-        runner = _compiled_runner(int(x_arr.shape[0]))
-        if y0 is None:
-            y0 = np.asarray(y0_default, dtype=np.float64)
-        y = runner(x_arr, jnp.asarray(y0, dtype=jnp.float64))
-        return np.asarray(y, dtype=np.float64)
-
-    return _run
-
-
-def make_so3_method_runner(solver) -> Callable[..., np.ndarray]:
-    return make_matrix_method_runner(
-        solver,
-        geometry=SO3_GEOMETRY,
-        coeffs_matrix_fn=so3_coeffs_matrix,
-        y0_default=np.asarray(SO3_X0, dtype=np.float64),
-    )
-
-
-def get_error(y_exact: np.ndarray, y_vals: np.ndarray, step: int) -> float:
-    true_vals = y_exact[::step]
-    return float(np.max(np.linalg.norm(true_vals - y_vals, axis=(1, 2))))
-
-
-def matrix_distance(y0: np.ndarray, y1: np.ndarray) -> float:
-    return float(np.linalg.norm(y0 - y1))
-
-
-def compute_error_curves(
-    method_run,
-    paths: list[np.ndarray],
-    hs: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    forward_y = np.zeros(len(hs), dtype=np.float64)
-    backward_y = np.zeros(len(hs), dtype=np.float64)
-
-    for x in paths:
-        n = len(x) - 1
-        y_exact = method_run(x)
-
-        forward_error = []
-        backward_error = []
-        for h in hs:
-            step = max(1, int(round(n * h)))
-            x_coarse = x[::step]
-            y_coarse = method_run(x_coarse)
-            forward_error.append(get_error(y_exact, y_coarse, step))
-
-            y_backward = method_run(x_coarse[::-1], y0=y_coarse[-1])
-            backward_error.append(matrix_distance(y_exact[0], y_backward[-1]))
-
-        forward_y += np.log10(np.maximum(forward_error, np.finfo(np.float64).tiny))
-        backward_y += np.log10(np.maximum(backward_error, np.finfo(np.float64).tiny))
-
-    return forward_y / len(paths), backward_y / len(paths)
-
-
-def plot_curve(
-    name: str,
-    h: np.ndarray,
-    y: np.ndarray,
-    slope: float,
-    ax,
-    *,
-    backward: bool = False,
-) -> None:
-    x = np.log10(h)
-    dx = np.array([x[0], x[-1]], dtype=np.float64)
-    intercept = float(np.mean(y) - slope * np.mean(x))
-    resolved = y > np.log10(100 * np.finfo(np.float64).eps)
-    fit = np.polyfit(x[resolved], y[resolved], 1) if resolved.sum() >= 2 else (np.nan,)
-    err_label = YLABEL_BACKWARD if backward else YLABEL_FORWARD
-    mode = "backward" if backward else "forward"
-    print(f"{name} {mode} slope: {fit[0]:.6f}")
-
-    ax.scatter(
-        x,
-        y,
-        marker=mkr.MarkerStyle("x", fillstyle="none"),
-        color="crimson",
-    )
-    ax.plot(dx, slope * dx + intercept, color="mediumblue")
-    ax.legend([err_label, f"{np.round(slope, 1)}$x + c$"])
-    ax.set_xlabel(XLABEL)
-    ax.set_ylabel(err_label)
-
-
-def expected_rates(
-    solver,
-    hurst: float,
-) -> tuple[float, float]:
-    def _get(name: str):
-        return getattr(solver, name, lambda _: None)(None)
-
-    order = _get("order")
-    antisymmetric_order = _get("antisymmetric_order")
-    if antisymmetric_order is None:
-        if order is None:
-            raise ValueError(f"Solver {solver} does not define an order.")
-        antisymmetric_order = order + 1
-    return 2.0 * hurst - 0.5, (antisymmetric_order + 1.0) * hurst - 1.0
 
 
 def make_paths(
-    num_paths: int, path_power: int, key: jax.Array, hurst: float = 0.5
-) -> list[np.ndarray]:
-    num_steps = 2**path_power
-    if hurst == 0.5:
-        keys = jax.random.split(key, num_paths)
-        return [get_2d_bm(num_steps, T1 - T0, subkey) for subkey in keys]
-    return [get_2d_fbm(num_steps, hurst, T1 - T0) for _ in range(num_paths)]
+    num_paths: int, path_power: int, seed: int, hurst: Decimal
+) -> list[Array]:
+    """Generate once on the finest grid; all coarse paths are nested slices."""
+    count = 2**path_power
+    rng = np.random.default_rng(seed)
+    if hurst == Decimal("0.5"):
+        scale = (Decimal(1) / count).sqrt()
+        paths = []
+        for _ in range(num_paths):
+            normals = rng.standard_normal((count, 2))
+            increments = np.array(
+                [[Decimal.from_float(float(v)) * scale for v in row] for row in normals]
+            )
+            path = np.empty((count + 1, 2), dtype=object)
+            path[0] = Decimal(0)
+            path[1:] = np.cumsum(increments, axis=0)
+            paths.append(path)
+        return paths
+
+    # fbm uses NumPy's legacy global RNG; restore it after seeded sampling.
+    state = np.random.get_state()
+    try:
+        np.random.seed(seed)
+        sampler = FBM(n=count, hurst=float(hurst), length=1, method="daviesharte")
+        return [
+            np.array(
+                [
+                    [Decimal.from_float(float(v)) for v in row]
+                    for row in np.stack([sampler.fbm(), sampler.fbm()], axis=-1)
+                ]
+            )
+            for _ in range(num_paths)
+        ]
+    finally:
+        np.random.set_state(state)
+
+
+def solve_path(
+    method: DecimalMethod, path: Array, y0: Array | None = None
+) -> list[Array]:
+    y = identity() if y0 is None else y0
+    values = [y]
+    h = Decimal(1) / (len(path) - 1)
+    for i, dw in enumerate(np.diff(path, axis=0)):
+        y = method.step(
+            i * h, h, y, lambda _, state, dw=dw: stochastic_coeffs(state) @ dw
+        )
+        values.append(y)
+    return values
+
+
+def compute_error_curves(
+    method: DecimalMethod, paths: list[Array], powers: list[int]
+) -> tuple[list[list[Decimal]], list[list[Decimal]]]:
+    forward, backward = [], []
+    for path_index, path in enumerate(paths):
+        print(f"{method.name}: path {path_index + 1}/{len(paths)}", flush=True)
+        reference = solve_path(method, path)
+        path_forward, path_backward = [], []
+        for power in powers:
+            stride = (len(path) - 1) // 2**power
+            coarse_path = path[::stride]
+            coarse = solve_path(method, coarse_path)
+            path_forward.append(
+                max(
+                    norm(exact - y)
+                    for exact, y in zip(reference[::stride], coarse, strict=True)
+                )
+            )
+            reverse = solve_path(method, coarse_path[::-1], coarse[-1])
+            path_backward.append(norm(reverse[-1] - identity()))
+        forward.append(path_forward)
+        backward.append(path_backward)
+    return forward, backward
+
+
+def geometric_mean_errors(
+    samples: list[list[Decimal]], precision: int
+) -> list[Decimal]:
+    floor = Decimal(10) ** (1 - precision)
+    return [
+        Decimal(10)
+        ** (
+            sum((max(error, floor).log10() for error in errors), Decimal(0))
+            / len(errors)
+        )
+        for errors in zip(*samples, strict=True)
+    ]
+
+
+def expected_rates(method: DecimalMethod, hurst: Decimal) -> tuple[Decimal, Decimal]:
+    assert method.antisymmetric_order is not None
+    return 2 * hurst - Decimal("0.5"), (method.antisymmetric_order + 1) * hurst - 1
 
 
 def plot_grid(
-    paths: list[np.ndarray],
-    hs: np.ndarray,
-    hurst: float,
+    paths: list[Array],
+    min_power: int,
+    max_power: int,
+    hurst: Decimal,
+    precision: int,
+    seed: int,
     output_dir: Path,
 ) -> Path:
-    benchmarks = [("CF-EES25", CFEES25(), 5), ("CF-EES27", CFEES27(), 7)]
-
-    fig, axes = plt.subplots(len(benchmarks), 2, figsize=(10, 3.2 * len(benchmarks)))
-
-    for i, (name, solver, antisymmetric_order) in enumerate(benchmarks):
-        runner = make_so3_method_runner(solver)
-        forward_y, backward_y = compute_error_curves(runner, paths, hs)
-        forward_rate, backward_rate = expected_rates(solver, hurst)
-
-        plot_curve(name, hs, forward_y, forward_rate, axes[i][0], backward=False)
-        method = rf"\mathrm{{CF\text{{-}}EES}}_\mathcal{{R}}(2,{antisymmetric_order})"
-        axes[i][0].set_title(rf"$\mathcal{{E}}(h)$ for ${method}$")
-
-        plot_curve(name, hs, backward_y, backward_rate, axes[i][1], backward=True)
-        axes[i][1].set_title(rf"$\overleftarrow{{\mathcal{{E}}}}(h)$ for ${method}$")
-
-    plt.tight_layout()
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"stochastic_convergence_H{int(hurst * 100)}.pdf"
-    plt.savefig(output_path)
-    plt.close()
-    return output_path
+    with localcontext() as ctx:
+        ctx.prec = precision
+        methods = [m for m in make_methods() if m.antisymmetric_order is not None]
+        powers = list(range(min_power, max_power + 1))
+        hs = [Decimal(1) / 2**power for power in powers]
+        fig, axes = plt.subplots(2 * len(methods), 1, figsize=(5, 6.4 * len(methods)))
+        solver_results: dict[str, object] = {}
+        results: dict[str, object] = {
+            "arithmetic": "decimal.Decimal",
+            "precision_digits": precision,
+            "equation": "dR = R skew(F(R) dX), two-channel SO(3) diffusion, sigma=1",
+            "t0": "0",
+            "t1": "1",
+            "y0": "I_3",
+            "hurst": str(hurst),
+            "seed": seed,
+            "num_paths": len(paths),
+            "path_steps": len(paths[0]) - 1,
+            "path_sampling": "binary64 Gaussian samples / Davies-Harte FFT, converted with Decimal.from_float; Brownian scaling and accumulation use Decimal",
+            "reference": "same method on the common finest sampled path (finite-grid reference)",
+            "forward_error": "geometric mean of pathwise maximum Frobenius errors at coarse nodes",
+            "roundtrip_error": "geometric mean of endpoint Frobenius errors after reversing the coarse path",
+            "resolved_rule": "every sample error exceeds the Decimal roundoff threshold",
+            "min_power": min_power,
+            "max_power": max_power,
+            "h": [str(h) for h in hs],
+            "solvers": solver_results,
+        }
+        for i, method in enumerate(methods):
+            forward, backward = compute_error_curves(method, paths, powers)
+            rates = expected_rates(method, hurst)
+            method_results = method.metadata()
+            for j, (mode, samples, rate) in enumerate(
+                zip(("forward", "roundtrip"), (forward, backward), rates, strict=True)
+            ):
+                method_results[mode] = plot_curve(
+                    method.name,
+                    hs,
+                    geometric_mean_errors(samples, precision),
+                    float(rate),
+                    precision,
+                    axes[2 * i + j],
+                    backward=bool(j),
+                    sample_errors=samples,
+                )
+                set_method_title(axes[2 * i + j], method.title, backward=bool(j))
+            solver_results[method.name] = method_results
+        # Decimal formatting keeps distinct H values distinct in output names.
+        label = format((hurst * 100).normalize(), "f")
+        return save_figure(
+            fig, results, output_dir, f"stochastic_convergence_decimal_H{label}"
+        )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    add_common_arguments(parser, min_power=3, max_power=11)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--num-paths", type=int, default=12)
     parser.add_argument("--path-power", type=int, default=13)
-    parser.add_argument("--hurst", type=float, nargs="+", default=[0.4, 0.5, 0.6])
-    parser.add_argument("--min-power", type=int, default=3)
-    parser.add_argument("--max-power", type=int, default=11)
     parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path(__file__).resolve().parent / "outputs",
+        "--hurst",
+        type=Decimal,
+        nargs="+",
+        default=list(map(Decimal, ("0.4", "0.5", "0.6"))),
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    validate_common_arguments(parser, args)
+    if args.num_paths < 1:
+        parser.error("num-paths must be positive.")
+    if args.path_power <= args.max_power:
+        parser.error(
+            "path-power must exceed max-power so the reference is finer than every plotted path."
+        )
+    if args.seed < 0 or args.seed >= 2**32:
+        parser.error("seed must lie in [0, 2^32).")
+    if any(not h.is_finite() or not Decimal("0.25") < h < 1 for h in args.hurst):
+        parser.error("Each Hurst parameter must satisfy 1/4 < H < 1.")
+    return args
 
 
 def main() -> None:
     args = parse_args()
-    hs = np.array(
-        [2.0 ** (-k) for k in range(args.min_power, args.max_power + 1)],
-        dtype=np.float64,
-    )
-    key = jax.random.key(args.seed)
-    for hurst in args.hurst:
-        np.random.seed(args.seed)
-        paths = make_paths(args.num_paths, args.path_power, key, hurst=hurst)
-        output_path = plot_grid(paths, hs, hurst, args.output_dir)
-        print(f"H={hurst:.1f} saved {output_path}")
+    with localcontext() as ctx:
+        ctx.prec = args.precision
+        for hurst in args.hurst:
+            paths = make_paths(args.num_paths, args.path_power, args.seed, hurst)
+            output_path = plot_grid(
+                paths,
+                args.min_power,
+                args.max_power,
+                hurst,
+                args.precision,
+                args.seed,
+                args.output_dir,
+            )
+            print(f"H={hurst:g} saved {output_path} (also .pdf and .json)")
 
 
 if __name__ == "__main__":

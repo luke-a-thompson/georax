@@ -15,6 +15,7 @@ from georax import (
     RKMK,
     SO,
     SRKMK,
+    CFCosineEES,
     Euclidean,
     GeometricEuler,
     GeometricEulerHeun,
@@ -73,6 +74,9 @@ SOLVERS = [
     CG4(),
     CFEES25(),
     CFEES27(),
+    CFCosineEES(3),
+    CFCosineEES(9),
+    CFCosineEES(11),
     RKMK(diffrax.Heun()),
     SRKMK(diffrax.GeneralShARK()),
 ]
@@ -151,7 +155,7 @@ def test_model_parameters_can_be_trained_through_geometric_term(solver):
     np.testing.assert_allclose(derivative, expected, rtol=1e-7)
 
 
-@pytest.mark.parametrize("solver", [CFEES25(), CFEES27()])
+@pytest.mark.parametrize("solver", [CFEES25(), CFEES27(), CFCosineEES(9)])
 def test_reversible_adjoint_remains_compatible(solver):
     term = GeometricTerm(lambda t, y, args: args * y, Euclidean())
 

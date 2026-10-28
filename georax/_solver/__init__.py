@@ -1,3 +1,4 @@
+from .cf_cosine_ees import CFCosineEES as CFCosineEES
 from .cf_ees25 import CFEES25 as CFEES25
 from .cf_ees27 import CFEES27 as CFEES27
 from .cg2 import CG2 as CG2

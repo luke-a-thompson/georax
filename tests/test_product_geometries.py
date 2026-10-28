@@ -11,6 +11,7 @@ from georax import (
     SO,
     SPD,
     SRKMK,
+    CFCosineEES,
     Euclidean,
     GeometricTerm,
     Product,
@@ -106,7 +107,9 @@ def test_sphere_batched_rotation_conventions_and_pullback():
 
 
 @pytest.mark.parametrize(
-    "solver", [CG2(), CFEES25(), CFEES27()], ids=lambda s: type(s).__name__
+    "solver",
+    [CG2(), CFEES25(), CFEES27(), CFCosineEES(9)],
+    ids=lambda s: type(s).__name__,
 )
 def test_product_saved_observations_and_gradients(solver):
     geometry = Product(TangentTorus(2), SPD(2), SO(2), Sphere(3))
@@ -172,7 +175,7 @@ def test_product_saved_observations_and_gradients(solver):
     assert jnp.isfinite(forward) and abs(forward) > 1e-6
     np.testing.assert_allclose(forward, finite_difference, rtol=2e-6, atol=1e-8)
     np.testing.assert_allclose(reverse, forward, rtol=1e-10, atol=1e-11)
-    if isinstance(solver, (CFEES25, CFEES27)):
+    if isinstance(solver, diffrax.AbstractReversibleSolver):
         reversible = jax.grad(lambda w: loss(w, diffrax.ReversibleAdjoint()))(0.7)
         np.testing.assert_allclose(reversible, reverse, rtol=2e-6, atol=2e-8)
 

@@ -31,7 +31,8 @@ class CFEES25(_AbstractCFEES):
         ```
     """
 
-    recurrence: ClassVar[LowStorageRecurrence] = EES25.recurrence
+    # A constant implements the base class's abstract recurrence property.
+    recurrence: ClassVar[LowStorageRecurrence] = EES25.recurrence  # pyright: ignore[reportIncompatibleMethodOverride]
 
     def antisymmetric_order(self, terms: AbstractTerm) -> int:
         del terms

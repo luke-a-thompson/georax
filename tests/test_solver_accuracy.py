@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import partial
+
 import diffrax
 import jax
 import jax.numpy as jnp
@@ -9,6 +11,8 @@ from _problems import (
     make_solver_accuracy_ambient_term,
     make_solver_accuracy_term,
 )
+
+from georax import CFCosineEES
 
 # Improves stability of empirical slope estimation for convergence-order checks.
 jax.config.update("jax_enable_x64", True)
@@ -60,7 +64,10 @@ def _reversible_roundtrip_error(
     return float(jnp.linalg.norm(y - _Y0))
 
 
-@pytest.mark.parametrize(("solver_name", "solver_cls"), SOLVERS)
+@pytest.mark.parametrize(
+    ("solver_name", "solver_cls"),
+    SOLVERS + [(f"cfcosineees{p}", partial(CFCosineEES, p)) for p in (3, 9, 11)],
+)
 def test_solver_empirical_order_matches_declared_order(solver_name, solver_cls):
     del solver_name
 
@@ -94,7 +101,10 @@ def test_solver_empirical_order_matches_declared_order(solver_name, solver_cls):
     )
 
 
-@pytest.mark.parametrize(("solver_name", "solver_cls"), SOLVERS)
+@pytest.mark.parametrize(
+    ("solver_name", "solver_cls"),
+    SOLVERS + [(f"cfcosineees{p}", partial(CFCosineEES, p)) for p in (3, 5, 7)],
+)
 def test_solver_backward_empirical_order_matches_declared_order(
     solver_name, solver_cls
 ):
